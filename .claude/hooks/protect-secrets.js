@@ -24,7 +24,8 @@ function check(toolName, toolInput = {}) {
   else hit = [toolInput.file_path, toolInput.notebook_path, toolInput.path].find(isSecretPath);
   if (!hit) return null;
   return `Blocked: "${hit}" may hold secrets, so Claude must not read or change it. ` +
-    'Ask the user to set the value themselves; to show which settings exist, use a .env.example file with no real values.';
+    'Ask the user to set the value themselves; to show which settings exist, use a .env.example file with no real values. ' +
+    'If the name only appeared in message text, write the text to a file and pass it with `git commit -F <file>` or `gh pr create --body-file <file>`.';
 }
 
 if (require.main === module) {

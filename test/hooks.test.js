@@ -16,7 +16,7 @@ test('main guard: blocks pushing to main from any branch', () => {
   assert.equal(mainGuard.check('git push origin main-fix', on('main-fix')), null);
 });
 test('secret guard: blocks secret files, allows templates and normal code', () => {
-  for (const p of ['.env', '/w/app/.env.local', 'keys/server.pem', 'config/secrets.json', 'credentials.yml', '/home/u/.ssh/id_ed25519'])
+  for (const p of ['.env', '/w/app/.env.local', 'keys/server.pem', 'config/secrets.json', 'secrets.yml', 'credentials.yml', 'credentials.json', '/home/u/.ssh/id_ed25519'])
     assert.ok(secrets.isSecretPath(p), p);
   for (const p of ['.env.example', 'src/idempotencyKey.js', 'src/secrets.js', 'config/regions/za-jhb.json', 'README.md'])
     assert.equal(secrets.isSecretPath(p), false, p);
@@ -25,8 +25,7 @@ test('secret guard: blocks secret files, allows templates and normal code', () =
   assert.ok(secrets.check('Bash', { command: 'cat .env | head' }));
   assert.ok(secrets.check('Bash', { command: 'node --env-file=.env server.js' }));
   assert.equal(secrets.check('Bash', { command: 'cp .env.example .env.sample' }), null);
-  assert.equal(secrets.check('Edit', { file_path: 'src/pricing.js' }), null);
-});
+  assert.equal(secrets.check('Edit', { file_path: 'src/pricing.js' }), null);});
 test('stop hook: sends Claude back once when tests fail, never loops', () => {
   assert.equal(stop.decide({}, () => ({ ok: true, output: '' })), null);
   assert.match(stop.decide({}, () => ({ ok: false, output: 'not ok 3 - ledger' })), /npm test failed[\s\S]*ledger/);
