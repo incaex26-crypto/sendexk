@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { open } = require('./src/db');
 const S = require('./src/service');
+const A = require('./src/auth');
 
 const ADMIN_KEY = process.env.ADMIN_KEY || 'dev-admin';
 const PUBLIC = path.join(__dirname, 'public');
@@ -26,8 +27,18 @@ function createApp({ db, regions }) {
   add('GET', '/api/confirm/:token', ({ region, params }) => S.previewConfirm(db, region, params.token));
   add('POST', '/api/confirm/:token', ({ region, params, body }) => { const r = S.confirm(db, region, params.token, body); return { order: pub(r.order), deliveryCode: r.deliveryCode, serviceDate: r.serviceDate, rolled: r.rolled }; });
 
-  // ---- driver (starter auth: x-driver-id header. NOT SECURE. Replace with phone OTP, see spec 05) ----
-  add('POST', '/api/drivers', ({ region, body }) => ({ status: 201, body: { id: S.createDriver(db, region, body) } }));
+  // ---- driver login (phone OTP). No SMS provider yet, so the code can only come back in the reply. ----
+  // Opt-in, never on in production: forgetting a setting on deploy must not hand out every driver's code.
+  add('POST', '/api/auth/otp', ({ region, body }) => {
+    if (process.env.OTP_DEV_CODES !== '1' || process.env.NODE_ENV === 'production') throw S.err(503, 'SMS sending is not set up yet (for testing, run `npm run dev`)');
+    const r = A.requestOtp(db, region, body.phone);
+    return { sent: true, devCode: r.code };
+  });
+  add('POST', '/api/auth/verify', ({ region, body }) => A.verifyOtp(db, region, body.phone, body.code));
+  add('POST', '/api/auth/logout', ({ token }) => { A.logout(db, token); return { ok: true }; }, { driver: true });
+
+  // ---- driver (Authorization: Bearer <session token>) ----
+  add('POST', '/api/drivers', ({ region, body }) => ({ status: 201, body: { id: S.createDriver(db, region, body) } }), { admin: true });
   add('GET', '/api/driver/runs', ({ region, driver }) => S.listOpenRuns(db, region, driver), { driver: true });
   add('POST', '/api/driver/runs/:id/accept', ({ region, params, driver }) => { const r = S.acceptRun(db, region, +params.id, driver); return { run: r.view }; }, { driver: true });
   add('POST', '/api/driver/runs/:id/release', ({ region, params, driver }) => { S.releaseRun(db, region, +params.id, driver); return { ok: true }; }, { driver: true });
@@ -60,10 +71,17 @@ function createApp({ db, regions }) {
         if (r.method !== req.method) continue;
         const m = r.re.exec(url.pathname); if (!m) continue;
         if (r.opts.admin && req.headers['x-admin-key'] !== ADMIN_KEY) return send(res, 401, { error: 'admin key required' });
-        let driver = null;
-        if (r.opts.driver) { driver = Number(req.headers['x-driver-id']); if (!driver) return send(res, 401, { error: 'x-driver-id required' }); }
+        const region = regionOf(url);
+        let driver = null, token = null;
+        if (r.opts.driver) {
+          token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+          const s = A.sessionDriver(db, token);
+          if (!s) return send(res, 401, { error: 'please log in' });
+          if (s.regionId !== region.id) return send(res, 403, { error: 'this login is for another region' });
+          driver = s.driverId;
+        }
         const body = req.method === 'POST' ? await readJson(req) : {};
-        const out = await r.handler({ req, url, region: regionOf(url), params: m.groups || {}, body, driver });
+        const out = await r.handler({ req, url, region, params: m.groups || {}, body, driver, token });
         if (out && out.status && out.body) return send(res, out.status, out.body);
         return send(res, 200, out);
       }

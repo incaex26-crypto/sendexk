@@ -5,6 +5,7 @@
   "country": "ZA",
   "timezone": "Africa/Johannesburg",
   "currency": "ZAR",
+  "phone": { "countryCode": "27", "trunkPrefix": "0" },
   "brand": { "name": "SenDexk" },
   "center": { "lat": -26.10, "lng": 28.05 },
   "serviceRadiusKm": 22,

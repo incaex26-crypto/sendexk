@@ -1,19 +1,30 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Driver</title><link rel="stylesheet" href="app.css"></head><body>
 <h1>Driver</h1><nav><a href="/">Book</a><a href="/driver.html">Driver</a><a href="/admin.html">Admin</a></nav>
-<div class="card"><label>Driver id (starter login; use phone OTP in production)</label><div class="row"><input id="did" type="number" value="1"><button id="go">Open</button></div></div>
+<div class="card" id="login"><label>Phone number</label><div class="row"><input id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="082 123 4567"><button id="send">Send code</button></div>
+<div id="codeRow" hidden><label>6-digit code</label><div class="row"><input id="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"><button id="verify">Log in</button></div></div>
+<p id="msg" class="mute"></p></div>
 <div id="me"></div><div id="runs"></div>
 <script src="app.js"></script><script>
 let H={};const money=R;
-$('#go').onclick=load;async function load(){H={'x-driver-id':$('#did').value};try{const m=await api('GET','/api/driver/me',null,H);
+// The session token lives only on this phone. Storage can be blocked (private mode), so fail quietly.
+const store={get(){try{return localStorage.getItem('driverToken')}catch{return null}},set(t){try{t?localStorage.setItem('driverToken',t):localStorage.removeItem('driverToken')}catch{}}};
+function useToken(t,note=''){store.set(t);H=t?{authorization:'Bearer '+t}:{};$('#login').hidden=!!t;$('#msg').textContent=note;if(!t){$('#me').innerHTML='';$('#runs').innerHTML='';$('#codeRow').hidden=true;$('#code').value=''}}
+$('#send').onclick=async()=>{try{const r=await api('POST','/api/auth/otp',{phone:$('#phone').value});$('#codeRow').hidden=false;
+$('#msg').textContent=r.devCode?`Test mode (no SMS yet): your code is ${r.devCode}`:'If this number belongs to a driver, a code is on its way.';$('#code').focus()}catch(e){$('#msg').textContent=e.message}};
+$('#verify').onclick=async()=>{try{const r=await api('POST','/api/auth/verify',{phone:$('#phone').value,code:$('#code').value});useToken(r.token);load()}catch(e){$('#msg').textContent=e.message}};
+async function logout(){try{await api('POST','/api/auth/logout',{},H)}catch{}useToken(null,'Logged out.')}
+async function load(){try{const m=await api('GET','/api/driver/me',null,H);
 $('#me').innerHTML=`<div class="card"><b>${m.driver.name}</b> <span class=pill>${m.driver.vehicle}</span> <span class=pill>${m.driver.tier}</span>
 ${m.driver.tier==='standard'?'<button id="pro" class="alt">Get Pro for 30 days (lower platform share)</button>':''}
-<button id="pin" class="alt">Send my location now</button></div>`;
+<button id="pin" class="alt">Send my location now</button><button id="out" class="alt">Log out</button></div>`;
+$('#out').onclick=logout;
 $('#pro')&&($('#pro').onclick=async()=>{await api('POST','/api/driver/pro',{},H);load()});
 $('#pin').onclick=()=>navigator.geolocation?.getCurrentPosition(p=>api('POST','/api/driver/ping',{lat:p.coords.latitude,lng:p.coords.longitude},H).then(()=>alert('Sent')));
 if(m.run){$('#runs').innerHTML=`<h2>Your run #${m.run.id} · ${money(m.run.payoutCents)}</h2>`+m.parcels.map(p=>`<div class="card"><b>#${p.id}</b> ${p.pickup_name} → ${p.drop_name} <span class=pill>${p.status}</span><div class=mute>${p.drop_addr||''}</div><div id="a${p.id}"></div></div>`).join('');
 m.parcels.forEach(p=>actions(p))}else{const rs=await api('GET','/api/driver/runs',null,H);
 $('#runs').innerHTML='<h2>Open runs</h2>'+(rs.length?rs.map(r=>`<div class="card"><div class=big>${money(r.payoutCents)}</div>${r.parcels} parcels · ${r.km} km · ~${r.minutes} min${r.bonusCents?` <span class=pill>incl. ${money(r.bonusCents)} hotspot bonus</span>`:''}<button data-r="${r.id}">Accept</button></div>`).join(''):'<p class=mute>No runs right now.</p>');
-document.querySelectorAll('[data-r]').forEach(b=>b.onclick=async()=>{try{await api('POST',`/api/driver/runs/${b.dataset.r}/accept`,{},H);load()}catch(e){alert(e.message);load()}})}}catch(e){$('#me').innerHTML=`<p class=err>${e.message}</p>`}}
+document.querySelectorAll('[data-r]').forEach(b=>b.onclick=async()=>{try{await api('POST',`/api/driver/runs/${b.dataset.r}/accept`,{},H);load()}catch(e){alert(e.message);load()}})}}catch(e){if(e.status===401)return useToken(null,'Please log in again.');$('#me').innerHTML=`<p class=err>${e.message}</p>`}}
+const saved=store.get();if(saved){useToken(saved);load()}
 function actions(p){const el=$('#a'+p.id),nxt={batched:['collect','Collected'],collected:['out','Out for delivery'],out_for_delivery:null}[p.status];
 if(nxt)el.innerHTML=`<button data-x="${nxt[0]}">${nxt[1]}</button>`;
 else if(p.status==='out_for_delivery')el.innerHTML=`<input placeholder="Recipient's 4-digit code" id="c${p.id}" inputmode="numeric"><button data-x="deliver">Delivered</button><button class="alt" data-x="fail">Could not deliver</button>`;
