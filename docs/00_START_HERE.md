@@ -43,7 +43,7 @@ Steps in order, one at a time: create repo > open Codespace > check `node --vers
 ## Step 5. Your first Claude session (10 minutes)
 1. At claude.ai/code pick the repository `sendexk`.
 2. Choose **Plan** mode (Claude proposes, you approve).
-3. Type: `Run /resume. Read CLAUDE.md and docs/PROGRESS.md, run the tests, and tell me in plain words where we are.`
+3. Type: `Run /pickup. Read CLAUDE.md and docs/PROGRESS.md, run the tests, and tell me in plain words where we are.`
 4. Claude should report that 35 tests pass. If not, paste what it says to me.
 5. Each task you give gets its own branch. When it is done, press **Create PR**, read the summary, then **Merge** on GitHub.
 
@@ -55,7 +55,7 @@ Read it once. The agent does the downloading in Phase 2. Your job is to decide t
 
 ## Step 8. Working rhythm
 - One task at a time, in plain words: "Add phone-login for drivers" not "improve the app".
-- Always start with `/resume` and end with `/handoff`. This is what lets another agent continue if Claude runs out.
+- Always start with `/pickup` and end with `/handoff`. This is what lets another agent continue if Claude runs out.
 - Merge only when the tests are green (a green tick on the pull request).
 
 ## If you get stuck

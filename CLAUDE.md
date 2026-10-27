@@ -37,4 +37,4 @@ Businesses and individuals book same-day pickup and delivery. The recipient must
 `npm test` · `npm run simulate` · `npm run seed` · `npm start` (http://localhost:3000, admin key `dev-admin`) · `npm run new-region`
 
 ## Slash commands in `.claude/commands/`
-`/resume` start-of-session routine · `/handoff` end-of-session notes · `/status` plain-language progress · `/test-all` tests + simulator + summary
+`/pickup` start-of-session routine · `/handoff` end-of-session notes · `/status` plain-language progress · `/test-all` tests + simulator + summary

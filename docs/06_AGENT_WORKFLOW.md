@@ -1,7 +1,7 @@
 # Agent workflow: building for longer, and what to do when Claude runs out
 
 ## Normal loop
-`/resume` > one small task on its own branch > `npm test` > commit > pull request > user merges > `/handoff`.
+`/pickup` > one small task on its own branch > `npm test` > commit > pull request > user merges > `/handoff`.
 Claude Code in the cloud keeps running if you close the tab and counts toward your plan's usage like everything else. Several tasks can run side by side, each on its own branch.
 
 ## Why the md files exist
@@ -12,7 +12,7 @@ Any agent starts blank. These files are its memory: `CLAUDE.md` (rules), `docs/P
 2. Make sure everything is committed on a branch and tests pass. If tests fail, write the failing test name at the top of PROGRESS.md.
 3. Either wait for the limit to reset, or give the repository to another coding agent. Many coding tools read `AGENTS.md`; check that your tool does, or paste: "Read AGENTS.md, CLAUDE.md and docs/PROGRESS.md, then continue."
 4. The other agent works on a branch too, never on `main`. Tests decide whether its work is acceptable.
-5. When Claude is back, `/resume` picks up from the updated PROGRESS.md.
+5. When Claude is back, `/pickup` picks up from the updated PROGRESS.md.
 
 ## Keeping other agents safe
 - Use a branch per agent and merge only green pull requests.

@@ -20,7 +20,7 @@ User created GitHub repo `sendexk` (account incaex26-crypto) and opened a Codesp
 The user wants instructions given ONE small action at a time (beginner).
 
 ## Next step (one action)
-User follows `docs/00_START_HERE.md` steps 1-5, then starts a cloud session with `/resume`.
+User follows `docs/00_START_HERE.md` steps 1-5, then starts a cloud session with `/pickup`.
 After that: Phase 1 first task = "driver phone login (OTP) with tests". Safe to start only after the user confirms the open decisions 1-3 in `03_DECISIONS.md` are not blocking (they do not block Phase 1).
 
 ## Blocked / waiting on the user

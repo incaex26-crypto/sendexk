@@ -1,6 +1,6 @@
 # Roadmap. Each phase ends with "Done when".
 
-**Phase 0: Set-up (user + Claude).** Repo on GitHub, Claude connected, first `/resume` works, CI green. *Done when:* a pull request from Claude is merged with a green check.
+**Phase 0: Set-up (user + Claude).** Repo on GitHub, Claude connected, first `/pickup` works, CI green. *Done when:* a pull request from Claude is merged with a green check.
 
 **Phase 1: Make the core real.** Driver and admin login (phone OTP), payments sandbox (Paystack or PayFast test mode, webhook with signature check), message sending (SMS/WhatsApp sandbox), input validation, rate limiting, basic audit screen. *Done when:* a full order runs end to end in test mode with no mocks, and the tests cover failure paths.
 
