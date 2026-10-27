@@ -8,3 +8,6 @@ data/maps/*
 .env
 *.log
 .DS_Store
+
+# Knowledge graph output (rebuild with /graphify)
+graphify-out/

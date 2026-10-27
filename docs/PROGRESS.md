@@ -15,6 +15,12 @@ See Settled in `03_DECISIONS.md` and Phase 1b in `04_ROADMAP.md`. Not yet built.
 - Wrote CLAUDE.md, AGENTS.md, slash commands, CI, docs 00-08.
 - Researched: Claude Code in the cloud setup, plugin install commands, PMTiles extract and serve commands.
 
+## Automations added (2026-10-27, branch `chore/automations`, not merged)
+- Hooks (`.claude/settings.json` + `.claude/hooks/*.js`): no commits/pushes on or to main; no reading/editing secret files; `npm test` at end of each turn.
+- Commands `/ship` and `/ask-decision`; subagent `rules-checker`. `graphify-out/` added to `.gitignore`.
+- 39 tests pass (4 new in `test/hooks.test.js`). Waiting on the user to review and merge the pull request.
+- Environment done: project is in the Codespace and Claude Code runs there; Graphify installed (graph built locally in `graphify-out/`).
+
 ## Environment status (2026-10-27)
 User created GitHub repo `sendexk` (account incaex26-crypto) and opened a Codespace (Node v24.21.0, Git present). Work laptop blocks installs, so the Codespace is the dev environment. Next: upload this project into the Codespace, run `npm test`, then install Claude Code extension and sign in, then plugins one at a time in this order: Claude Code Setup, Graphify (`uv tool install graphifyy`, `graphify install`), Agent Skills (`/plugin marketplace add anthropics/skills`), Ponytail (on a branch; source unverified), OmniRoute last (set INITIAL_PASSWORD first, fallback use only, never global ANTHROPIC_BASE_URL). Plugins do not run in claude.ai/code cloud sessions.
 The user wants instructions given ONE small action at a time (beginner).
