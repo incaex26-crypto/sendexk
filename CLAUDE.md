@@ -37,4 +37,8 @@ Businesses and individuals book same-day pickup and delivery. The recipient must
 `npm test` · `npm run simulate` · `npm run seed` · `npm start` (http://localhost:3000, admin key `dev-admin`) · `npm run new-region`
 
 ## Slash commands in `.claude/commands/`
-`/pickup` start-of-session routine · `/handoff` end-of-session notes · `/status` plain-language progress · `/test-all` tests + simulator + summary
+`/pickup` start-of-session routine · `/handoff` end-of-session notes · `/status` plain-language progress · `/test-all` tests + simulator + summary · `/ship` tests + rules check + commit + push + pull request · `/ask-decision` record a business question under Open
+
+## Automations (in `.claude/`, tested in `test/hooks.test.js`)
+- Hooks in `.claude/settings.json`: block `git commit`/`git push` on main or to main; block reading or editing secret files (`.env`, keys); run `npm test` when a turn ends and send Claude back once if it fails.
+- Subagent `rules-checker` (`.claude/agents/`): read-only review of changes against the rules above. Run it before every pull request (`/ship` does).
