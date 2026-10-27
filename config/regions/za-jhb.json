@@ -57,5 +57,9 @@
     "deliveryCodeMaxAttempts": 5
   },
   "hotspots": { "cellKm": 2, "perDriver": 3, "forecastWeight": 0.5, "minGap": 2, "bonus": 20, "dailyBonusCap": 500 },
-  "payouts": { "holdbackPct": 10, "holdbackDays": 3 }
+  "payouts": { "holdbackPct": 10, "holdbackDays": 3 },
+  "map": {
+    "tilesUrl": "/maps/jhb.pmtiles",
+    "bbox": [27.83, -26.30, 28.27, -25.90]
+  }
 }

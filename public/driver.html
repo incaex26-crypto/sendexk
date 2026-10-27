@@ -1,19 +1,118 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Driver</title><link rel="stylesheet" href="app.css"></head><body>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Driver</title>
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+</head><body>
 <h1>Driver</h1><nav><a href="/">Book</a><a href="/driver.html">Driver</a><a href="/admin.html">Admin</a></nav>
 <div class="card"><label>Driver id (starter login; use phone OTP in production)</label><div class="row"><input id="did" type="number" value="1"><button id="go">Open</button></div></div>
+<div id="run-map" style="width:100%;height:320px;display:none;border-radius:8px;overflow:hidden;margin:1rem 0;position:relative"></div>
 <div id="me"></div><div id="runs"></div>
-<script src="app.js"></script><script>
-let H={};const money=R;
-$('#go').onclick=load;async function load(){H={'x-driver-id':$('#did').value};try{const m=await api('GET','/api/driver/me',null,H);
-$('#me').innerHTML=`<div class="card"><b>${m.driver.name}</b> <span class=pill>${m.driver.vehicle}</span> <span class=pill>${m.driver.tier}</span>
+
+<script src="app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"></script>
+<script>
+let H={}, _region=null, _map=null, _protocolAdded=false;
+
+async function fetchRegion(){if(!_region)_region=await api('GET','/api/region');return _region;}
+
+$('#go').onclick=load;
+
+async function load(){
+  H={'x-driver-id':$('#did').value};
+  try{
+    const [m, region]=await Promise.all([api('GET','/api/driver/me',null,H), fetchRegion()]);
+    $('#me').innerHTML=`<div class="card"><b>${m.driver.name}</b> <span class=pill>${m.driver.vehicle}</span> <span class=pill>${m.driver.tier}</span>
 ${m.driver.tier==='standard'?'<button id="pro" class="alt">Get Pro for 30 days (lower platform share)</button>':''}
 <button id="pin" class="alt">Send my location now</button></div>`;
-$('#pro')&&($('#pro').onclick=async()=>{await api('POST','/api/driver/pro',{},H);load()});
-$('#pin').onclick=()=>navigator.geolocation?.getCurrentPosition(p=>api('POST','/api/driver/ping',{lat:p.coords.latitude,lng:p.coords.longitude},H).then(()=>alert('Sent')));
-if(m.run){$('#runs').innerHTML=`<h2>Your run #${m.run.id} · ${money(m.run.payoutCents)}</h2>`+m.parcels.map(p=>`<div class="card"><b>#${p.id}</b> ${p.pickup_name} → ${p.drop_name} <span class=pill>${p.status}</span><div class=mute>${p.drop_addr||''}</div><div id="a${p.id}"></div></div>`).join('');
-m.parcels.forEach(p=>actions(p))}else{const rs=await api('GET','/api/driver/runs',null,H);
-$('#runs').innerHTML='<h2>Open runs</h2>'+(rs.length?rs.map(r=>`<div class="card"><div class=big>${money(r.payoutCents)}</div>${r.parcels} parcels · ${r.km} km · ~${r.minutes} min${r.bonusCents?` <span class=pill>incl. ${money(r.bonusCents)} hotspot bonus</span>`:''}<button data-r="${r.id}">Accept</button></div>`).join(''):'<p class=mute>No runs right now.</p>');
-document.querySelectorAll('[data-r]').forEach(b=>b.onclick=async()=>{try{await api('POST',`/api/driver/runs/${b.dataset.r}/accept`,{},H);load()}catch(e){alert(e.message);load()}})}}catch(e){$('#me').innerHTML=`<p class=err>${e.message}</p>`}}
+    $('#pro')&&($('#pro').onclick=async()=>{await api('POST','/api/driver/pro',{},H);load()});
+    $('#pin').onclick=()=>navigator.geolocation?.getCurrentPosition(p=>api('POST','/api/driver/ping',{lat:p.coords.latitude,lng:p.coords.longitude},H).then(()=>alert('Sent')));
+    if(m.run){
+      $('#runs').innerHTML=`<h2>Your run #${m.run.id} · ${R(m.run.payoutCents)}</h2>`+m.parcels.map(p=>`<div class="card"><b>#${p.id}</b> ${p.pickup_name} → ${p.drop_name} <span class=pill>${p.status}</span><div class=mute>${p.drop_addr||''}</div><div id="a${p.id}"></div></div>`).join('');
+      m.parcels.forEach(p=>actions(p));
+      showRunMap(m.parcels, region);
+    } else {
+      hideMap();
+      const rs=await api('GET','/api/driver/runs',null,H);
+      $('#runs').innerHTML='<h2>Open runs</h2>'+(rs.length?rs.map(r=>`<div class="card"><div class=big>${R(r.payoutCents)}</div>${r.parcels} parcels · ${r.km} km · ~${r.minutes} min${r.bonusCents?` <span class=pill>incl. ${R(r.bonusCents)} hotspot bonus</span>`:''}<button data-r="${r.id}">Accept</button></div>`).join(''):'<p class=mute>No runs right now.</p>');
+      document.querySelectorAll('[data-r]').forEach(b=>b.onclick=async()=>{try{await api('POST',`/api/driver/runs/${b.dataset.r}/accept`,{},H);load()}catch(e){alert(e.message);load()}});
+    }
+  }catch(e){$('#me').innerHTML=`<p class=err>${e.message}</p>`}
+}
+
+function hideMap(){
+  const el=document.getElementById('run-map');
+  if(el)el.style.display='none';
+  if(_map){_map.remove();_map=null;}
+}
+
+function showRunMap(parcels, region){
+  const el=document.getElementById('run-map');
+  if(!el||!parcels.length||!window.maplibregl||!window.pmtiles){return hideMap();}
+  el.style.display='block';
+
+  // Register protocol once
+  if(!_protocolAdded){
+    const protocol=new pmtiles.Protocol();
+    maplibregl.addProtocol('pmtiles',protocol.tile.bind(protocol));
+    _protocolAdded=true;
+  }
+
+  const tilesPath=(region.map&&region.map.tilesUrl)||'/maps/jhb.pmtiles';
+  const tileUrl='pmtiles://'+window.location.origin+tilesPath;
+
+  const style={
+    version:8,
+    sources:{protomaps:{type:'vector',url:tileUrl,attribution:'© <a href="https://openstreetmap.org">OpenStreetMap</a> contributors'}},
+    layers:[
+      {id:'bg',type:'background',paint:{'background-color':'#f0ece6'}},
+      {id:'earth',type:'fill',source:'protomaps','source-layer':'earth',paint:{'fill-color':'#f0ece6'}},
+      {id:'water',type:'fill',source:'protomaps','source-layer':'water',paint:{'fill-color':'#a8d4e6'}},
+      {id:'landuse',type:'fill',source:'protomaps','source-layer':'landuse',paint:{'fill-color':'#dff0d0','fill-opacity':0.6}},
+      {id:'buildings',type:'fill',source:'protomaps','source-layer':'buildings',minzoom:13,paint:{'fill-color':'#d8d4cc','fill-outline-color':'#b8b3ab'}},
+      {id:'roads_minor',type:'line',source:'protomaps','source-layer':'roads',paint:{'line-color':'#ffffff','line-width':['interpolate',['linear'],['zoom'],11,1,16,4]}},
+      {id:'roads_major',type:'line',source:'protomaps','source-layer':'roads',filter:['in',['get','pmap:kind'],['literal',['primary','secondary','trunk','highway']]],paint:{'line-color':'#f0d878','line-width':['interpolate',['linear'],['zoom'],10,2,16,8]}},
+    ]
+  };
+
+  if(_map){_map.remove();_map=null;}
+
+  const fallback=[region.center.lng,region.center.lat];
+  const fp=parcels.find(p=>p.pickup_lat&&p.pickup_lng);
+  _map=new maplibregl.Map({container:el,style,center:fp?[fp.pickup_lng,fp.pickup_lat]:fallback,zoom:12,attributionControl:true});
+
+  _map.on('error',()=>{
+    // Tiles not downloaded yet — show message without crashing
+    if(_map){_map.remove();_map=null;}
+    el.innerHTML='<div style="padding:2rem;text-align:center;color:#666;font-size:.9rem">Map tiles not available.<br>Run: <code>node scripts/get-map.js</code></div>';
+    el.style.display='block';
+  });
+
+  _map.on('load',()=>{
+    const bounds=new maplibregl.LngLatBounds();
+    let hasCoords=false;
+    parcels.forEach((p,i)=>{
+      const seq=String(i+1);
+      if(p.pickup_lat&&p.pickup_lng){
+        hasCoords=true; bounds.extend([p.pickup_lng,p.pickup_lat]);
+        const d=document.createElement('div');
+        d.title=`Pickup ${seq}: ${p.pickup_name}`;
+        d.style.cssText='width:26px;height:26px;border-radius:50%;background:#e8590c;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:bold;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.3)';
+        d.textContent=seq;
+        new maplibregl.Marker({element:d}).setLngLat([p.pickup_lng,p.pickup_lat]).setPopup(new maplibregl.Popup({offset:16}).setHTML(`<b>Pickup #${seq}</b><br>${p.pickup_name}`)).addTo(_map);
+      }
+      if(p.drop_lat&&p.drop_lng){
+        hasCoords=true; bounds.extend([p.drop_lng,p.drop_lat]);
+        const d=document.createElement('div');
+        d.title=`Drop ${seq}: ${p.drop_name}`;
+        d.style.cssText='width:26px;height:26px;border-radius:4px;background:#c01515;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:bold;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.3)';
+        d.textContent=seq;
+        new maplibregl.Marker({element:d}).setLngLat([p.drop_lng,p.drop_lat]).setPopup(new maplibregl.Popup({offset:16}).setHTML(`<b>Drop #${seq}</b><br>${p.drop_name}`)).addTo(_map);
+      }
+    });
+    if(hasCoords&&!bounds.isEmpty())_map.fitBounds(bounds,{padding:60,maxZoom:15});
+  });
+}
+
 function actions(p){const el=$('#a'+p.id),nxt={batched:['collect','Collected'],collected:['out','Out for delivery'],out_for_delivery:null}[p.status];
 if(nxt)el.innerHTML=`<button data-x="${nxt[0]}">${nxt[1]}</button>`;
 else if(p.status==='out_for_delivery')el.innerHTML=`<input placeholder="Recipient's 4-digit code" id="c${p.id}" inputmode="numeric"><button data-x="deliver">Delivered</button><button class="alt" data-x="fail">Could not deliver</button>`;
