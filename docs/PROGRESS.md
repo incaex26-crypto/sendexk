@@ -2,42 +2,45 @@
 
 Platform name: **SenDexk** (chosen 2026-10-26; availability not yet checked).
 
-## Current state (2026-10-26)
-- Working starter app: pricing (petrol/electric), batching with profit check, state machine, ledger, hotspots, ETA, API, 4 simple pages, seeded day simulator. 35 tests pass.
-- Interactive demo published as an artifact (see docs/01_PROJECT_BRIEF.md).
-- Repository documentation written. **Repo not yet created on GitHub by the user.**
-- Everything money-related is a mock. Prices are illustrative.
+## Current state (2026-10-27)
+- Working starter app: pricing (petrol/electric), batching, state machine, ledger, hotspots, ETA, API, 4 pages, seeded day simulator.
+- **Automations merged** (PR #1): hooks (no commits on/to main, no secret files, `npm test` at end of turn), `/ship`, `/ask-decision`, `rules-checker`.
+- **Driver phone login (OTP)** built on branch `feat/driver-otp-login` (PR #2 open, not merged). 52 tests. No SMS provider yet.
+- **Phase 1 payments** built on branch `feat/payments-sandbox` (PR #3 open, not merged). 57 tests. Ledger balanced.
+- Repo on GitHub (`incaex26-crypto/sendexk`), dev environment is a Codespace with Claude Code.
+- Everything money-related uses a sandbox provider. Prices are illustrative.
 
-## Money and pricing design settled (2026-10-26 afternoon)
-See Settled in `03_DECISIONS.md` and Phase 1b in `04_ROADMAP.md`. Not yet built. Tests still 35 passing because no code changed.
-
-## Done this session
-- Wrote CLAUDE.md, AGENTS.md, slash commands, CI, docs 00-08.
-- Researched: Claude Code in the cloud setup, plugin install commands, PMTiles extract and serve commands.
-
-## Automations added (2026-10-27, branch `chore/automations`, not merged)
-- Hooks (`.claude/settings.json` + `.claude/hooks/*.js`): no commits/pushes on or to main; no reading/editing secret files; `npm test` at end of each turn.
-- Commands `/ship` and `/ask-decision`; subagent `rules-checker`. `graphify-out/` added to `.gitignore`.
-- 39 tests pass (4 new in `test/hooks.test.js`). Waiting on the user to review and merge the pull request.
-- Environment done: project is in the Codespace and Claude Code runs there; Graphify installed (graph built locally in `graphify-out/`).
-
-## Environment status (2026-10-27)
-User created GitHub repo `sendexk` (account incaex26-crypto) and opened a Codespace (Node v24.21.0, Git present). Work laptop blocks installs, so the Codespace is the dev environment. Next: upload this project into the Codespace, run `npm test`, then install Claude Code extension and sign in, then plugins one at a time in this order: Claude Code Setup, Graphify (`uv tool install graphifyy`, `graphify install`), Agent Skills (`/plugin marketplace add anthropics/skills`), Ponytail (on a branch; source unverified), OmniRoute last (set INITIAL_PASSWORD first, fallback use only, never global ANTHROPIC_BASE_URL). Plugins do not run in claude.ai/code cloud sessions.
-The user wants instructions given ONE small action at a time (beginner).
+## Done this session (2026-10-27)
+- Evaluated Ponytail and OmniRoute plugins; both skipped. Notes in `docs/07_PLUGINS_AND_TOOLS.md`.
+- Built Phase 1 payments (`feat/payments-sandbox`, PR #3):
+  - `src/payments.js`: provider interface + sandbox (swap `PAYMENT_PROVIDER` env var for Paystack/PayFast).
+  - Individual card orders: `POST /api/orders/:id/paylink` → provider URL. `POST /api/webhook/payment` → verifies `x-signature`, idempotent.
+  - Business wallet: `topUp`, `walletBalance`; `createOrder` checks wallet ≥ cap, reserves into escrow, advances to `awaiting_confirmation`. Cap surplus on delivery returns to wallet.
+  - `cancelOrder`: escrow → wallet (business) or escrow → `refund_due` (card).
+  - DB: `payment_ref`, `payment_type` columns; migration for existing DBs.
+  - Simulator topped up with 2 000 000 cents per shop so the seeded day still runs.
+  - Rules-checker found 2 problems (both Rule 6 currency symbols); both fixed before PR.
 
 ## Next step (one action)
-User follows `docs/00_START_HERE.md` steps 1-5, then starts a cloud session with `/pickup`.
-After that: Phase 1 first task = "driver phone login (OTP) with tests". Safe to start only after the user confirms the open decisions 1-3 in `03_DECISIONS.md` are not blocking (they do not block Phase 1).
+Choose a real SMS/WhatsApp provider to send OTP codes (needed for `feat/driver-otp-login` to go live).
+Options: Vonage (Nexmo), Twilio, Africa's Talking (cheapest for ZA), or BulkSMS.
+**Ask the user before picking one.** Add to `docs/03_DECISIONS.md` Open.
+
+Then after both PRs are merged:
+- Wire up a real payment provider (Paystack for ZA) behind the `payments.js` interface.
+- Add per-IP rate limiting to OTP endpoint.
 
 ## Blocked / waiting on the user
-- Create GitHub account and repo; connect Claude (guide steps 1-4).
-- Decide: service area suburbs; individuals' pricing method; platform name.
-
-## Files touched
-All of `docs/`, `CLAUDE.md`, `AGENTS.md`, `.claude/commands/`, `.github/workflows/test.yml`, `.gitignore`.
+- Review and merge PR #2 (driver OTP login).
+- Review and merge PR #3 (payments sandbox).
+- Decide: SMS/WhatsApp provider for OTP (Open item — add to decisions).
+- Decide: real payment provider (Paystack/PayFast?).
 
 ## Notes for the next agent
 - Node 22.5+; run with `--disable-warning=ExperimentalWarning` (npm scripts do).
-- Map commands in docs/05 are unrun. Run and correct them in Phase 2.
+- To try the app with login: `npm run seed`, then `npm run dev`, driver page, phone `0710000000`.
+- Payments sandbox: `WEBHOOK_SECRET=dev-webhook-secret` (set in `npm run dev`). Real webhook needs env var in production.
+- Follow-ups from OTP review (not done): per-IP rate limit, revoke all sessions, clean up old otps/sessions rows, admin login.
+- Map commands in `docs/05` are unrun. Run and correct them in Phase 2.
 - The user is a beginner. Explain each step. Never push to main.
-- Phase 1b depends on the open item that stores keep a margin or not (decision 11); build it so the commission is a config value that can be zero.
+- Phase 1b commission rate lives in region config as `platformShare`; already configurable, can be zero.

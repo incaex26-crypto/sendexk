@@ -6,6 +6,7 @@ const { open } = require('./src/db');
 const S = require('./src/service');
 
 const ADMIN_KEY = process.env.ADMIN_KEY || 'dev-admin';
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'dev-webhook-secret';
 const PUBLIC = path.join(__dirname, 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' };
 
@@ -21,8 +22,16 @@ function createApp({ db, regions }) {
   add('POST', '/api/quote', ({ region, body }) => S.quote(region, body));
   add('POST', '/api/orders', ({ region, body, req }) => { const r = S.createOrder(db, region, body, req.headers['idempotency-key']); return { status: r.replay ? 200 : 201, body: { order: pub(r.order), quote: r.quote } }; });
   add('GET', '/api/orders/:id/track', ({ region, params }) => S.track(db, region, +params.id));
-  // Mock payment (replace with provider webhook). Dev only.
+  // Dev-only mock pay: auto-confirms without a payment provider. Disabled in production.
   add('POST', '/api/orders/:id/pay', ({ region, params }) => { if (process.env.NODE_ENV === 'production') throw S.err(403, 'disabled'); const r = S.markPaid(db, region, +params.id); return { order: pub(r.order), confirmUrl: `/confirm.html?t=${r.confirmToken}` }; });
+  // Real payment flow: create a payment link and redirect the customer to the provider.
+  add('POST', '/api/orders/:id/paylink', ({ region, params }) => { const r = S.createPaymentLink(db, region, +params.id); return { url: r.url, ref: r.ref }; });
+  // Webhook from payment provider. Body is raw so the real provider's HMAC can be verified.
+  add('POST', '/api/webhook/payment', async ({ req, region }) => {
+    const raw = await readRaw(req);
+    const sig = req.headers['x-signature'] || '';
+    return S.processWebhook(db, region, raw, sig, WEBHOOK_SECRET);
+  }, { raw: true });
   add('GET', '/api/confirm/:token', ({ region, params }) => S.previewConfirm(db, region, params.token));
   add('POST', '/api/confirm/:token', ({ region, params, body }) => { const r = S.confirm(db, region, params.token, body); return { order: pub(r.order), deliveryCode: r.deliveryCode, serviceDate: r.serviceDate, rolled: r.rolled }; });
 
@@ -41,6 +50,11 @@ function createApp({ db, regions }) {
   add('POST', '/api/driver/pin', ({ region, body, driver }) => { S.setPin(db, region, driver, body.lat, body.lng); return { ok: true }; }, { driver: true });
   add('POST', '/api/driver/pro', ({ region, driver }) => S.buyPro(db, region, driver), { driver: true }); // mock payment
   add('POST', '/api/driver/scan/:orderId', ({ region, params, body, driver }) => { const r = S.scan(db, region, +params.orderId, driver, body.action, body); if (r.error) return { status: r.status, body: { error: r.error } }; return { order: pub(r.order), eta: r.eta }; }, { driver: true });
+
+  // ---- wallet (admin-managed, business accounts only) ----
+  add('POST', '/api/accounts/:id/wallet/topup', ({ region, params, body }) => S.topUp(db, region, +params.id, body.amountCents), { admin: true });
+  add('GET', '/api/accounts/:id/wallet', ({ params }) => ({ balance: S.walletBalance(db, +params.id) }), { admin: true });
+  add('POST', '/api/orders/:id/cancel', ({ region, params }) => ({ order: pub(S.cancelOrder(db, region, +params.id)) }), { admin: true });
 
   // ---- admin ----
   add('GET', '/api/admin/overview', ({ region }) => S.overview(db, region), { admin: true });
@@ -62,7 +76,7 @@ function createApp({ db, regions }) {
         if (r.opts.admin && req.headers['x-admin-key'] !== ADMIN_KEY) return send(res, 401, { error: 'admin key required' });
         let driver = null;
         if (r.opts.driver) { driver = Number(req.headers['x-driver-id']); if (!driver) return send(res, 401, { error: 'x-driver-id required' }); }
-        const body = req.method === 'POST' ? await readJson(req) : {};
+        const body = req.method === 'POST' ? (r.opts.raw ? {} : await readJson(req)) : {};
         const out = await r.handler({ req, url, region: regionOf(url), params: m.groups || {}, body, driver });
         if (out && out.status && out.body) return send(res, out.status, out.body);
         return send(res, 200, out);
@@ -77,6 +91,13 @@ function createApp({ db, regions }) {
 }
 
 function send(res, status, body) { const s = JSON.stringify(body); res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(s), 'cache-control': 'no-store' }); res.end(s); }
+function readRaw(req) {
+  return new Promise((resolve, reject) => {
+    let n = 0, chunks = [];
+    req.on('data', (c) => { n += c.length; if (n > 100_000) { reject(Object.assign(new Error('body too large'), { status: 413 })); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+  });
+}
 function readJson(req) {
   return new Promise((resolve, reject) => {
     let n = 0, chunks = [];
