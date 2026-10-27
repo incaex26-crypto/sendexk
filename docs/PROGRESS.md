@@ -2,42 +2,32 @@
 
 Platform name: **SenDexk** (chosen 2026-10-26; availability not yet checked).
 
-## Current state (2026-10-26)
-- Working starter app: pricing (petrol/electric), batching with profit check, state machine, ledger, hotspots, ETA, API, 4 simple pages, seeded day simulator. 35 tests pass.
-- Interactive demo published as an artifact (see docs/01_PROJECT_BRIEF.md).
-- Repository documentation written. **Repo not yet created on GitHub by the user.**
+## Current state (2026-10-27)
+- Working starter app: pricing (petrol/electric), batching with profit check, state machine, ledger, hotspots, ETA, API, 4 simple pages, seeded day simulator.
+- **Driver phone login (OTP) built** on branch `feat/driver-otp-login` (not yet pushed or merged). 52 tests pass.
+- Automations merged into main (PR #1): hooks (no commits on/to main, no secret files, `npm test` at end of turn), `/ship`, `/ask-decision`, `rules-checker` subagent.
+- Repo on GitHub (`incaex26-crypto/sendexk`), dev environment is a Codespace with Claude Code. Graphify installed (graph in `graphify-out/`, ignored by git).
 - Everything money-related is a mock. Prices are illustrative.
 
-## Money and pricing design settled (2026-10-26 afternoon)
-See Settled in `03_DECISIONS.md` and Phase 1b in `04_ROADMAP.md`. Not yet built. Tests still 35 passing because no code changed.
-
-## Done this session
-- Wrote CLAUDE.md, AGENTS.md, slash commands, CI, docs 00-08.
-- Researched: Claude Code in the cloud setup, plugin install commands, PMTiles extract and serve commands.
-
-## Automations added (2026-10-27, branch `chore/automations`, not merged)
-- Hooks (`.claude/settings.json` + `.claude/hooks/*.js`): no commits/pushes on or to main; no reading/editing secret files; `npm test` at end of each turn.
-- Commands `/ship` and `/ask-decision`; subagent `rules-checker`. `graphify-out/` added to `.gitignore`.
-- 39 tests pass (4 new in `test/hooks.test.js`). Waiting on the user to review and merge the pull request.
-- Environment done: project is in the Codespace and Claude Code runs there; Graphify installed (graph built locally in `graphify-out/`).
-
-## Environment status (2026-10-27)
-User created GitHub repo `sendexk` (account incaex26-crypto) and opened a Codespace (Node v24.21.0, Git present). Work laptop blocks installs, so the Codespace is the dev environment. Next: upload this project into the Codespace, run `npm test`, then install Claude Code extension and sign in, then plugins one at a time in this order: Claude Code Setup, Graphify (`uv tool install graphifyy`, `graphify install`), Agent Skills (`/plugin marketplace add anthropics/skills`), Ponytail (on a branch; source unverified), OmniRoute last (set INITIAL_PASSWORD first, fallback use only, never global ANTHROPIC_BASE_URL). Plugins do not run in claude.ai/code cloud sessions.
-The user wants instructions given ONE small action at a time (beginner).
+## Done this session (2026-10-27)
+- Automations (PR #1, merged).
+- Driver login: `src/auth.js` (codes, sessions), `src/phone.js` (normalise numbers from region `phone` config), tables `otps` and `sessions`, routes `POST /api/auth/otp|verify|logout`, driver routes take `Authorization: Bearer <token>`, the `x-driver-id` header is gone, `POST /api/drivers` is admin-only, driver page has phone + code login and Log out.
+- Defaults chosen (user may change): code 6 digits, lasts 5 min, 5 wrong tries, max 3 codes per phone per 15 min; session 30 days.
+- No SMS provider yet: the code is shown on screen only when `OTP_DEV_CODES=1` (set by `npm run dev` and the API tests) and never when `NODE_ENV=production`. `npm start` refuses with 503.
+- rules-checker review done; its 2 problems fixed (codes now opt-in instead of shown by default; tests added for the production refusal and the other-region 403).
 
 ## Next step (one action)
-User follows `docs/00_START_HERE.md` steps 1-5, then starts a cloud session with `/pickup`.
-After that: Phase 1 first task = "driver phone login (OTP) with tests". Safe to start only after the user confirms the open decisions 1-3 in `03_DECISIONS.md` are not blocking (they do not block Phase 1).
+Push `feat/driver-otp-login` and open a pull request (ask the user first, or they run `/ship`).
+Then Phase 1 next task: SMS/WhatsApp sending behind one small function (needs provider choice: ask the user; add to `03_DECISIONS.md` Open), so codes and confirmation links are really sent.
 
 ## Blocked / waiting on the user
-- Create GitHub account and repo; connect Claude (guide steps 1-4).
-- Decide: service area suburbs; individuals' pricing method; platform name.
-
-## Files touched
-All of `docs/`, `CLAUDE.md`, `AGENTS.md`, `.claude/commands/`, `.github/workflows/test.yml`, `.gitignore`.
+- Review and merge the driver login pull request.
+- Decide: pilot suburbs and first 5 businesses (Open item 3); payment provider (Open item 6); SMS provider (not yet listed).
 
 ## Notes for the next agent
 - Node 22.5+; run with `--disable-warning=ExperimentalWarning` (npm scripts do).
+- To try the app with login: `npm run seed`, then `npm run dev`, driver page, phone `0710000000`.
+- Follow-ups from the login review (not done): per-IP rate limit (anyone can lock a driver out by asking for 3 codes every 15 min); a way to cancel all of a driver's sessions (suspension); cleanup of old `otps`/`sessions` rows (privacy). Admin login is still the shared `ADMIN_KEY` (Phase 1).
 - Map commands in docs/05 are unrun. Run and correct them in Phase 2.
 - The user is a beginner. Explain each step. Never push to main.
 - Phase 1b depends on the open item that stores keep a margin or not (decision 11); build it so the commission is a config value that can be zero.

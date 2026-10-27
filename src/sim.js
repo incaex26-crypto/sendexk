@@ -19,7 +19,7 @@ function populate(db, region, seed = 7) {
   const shops = ['Zinc Bakery', 'Urban Threads', 'Kasi Kicks', 'Green Pharmacy Online', 'Bloom Florist', 'Nuts & Bolts', 'Book Nook', 'Glow Cosmetics']
     .map((name, i) => { const z = region.zones[i % 4]; const loc = jitter(r, z, 0.8); return { id: S.createAccount(db, region, { kind: 'business', name, ...loc, address: `${name}, ${z.name}` }), name, loc, zone: z.id }; });
   const drivers = FLEET.map(([name, vehicle], i) => {
-    const id = S.createDriver(db, region, { name, vehicle, phone: '07' + String(1000000 + i) });
+    const id = S.createDriver(db, region, { name, vehicle, phone: '07' + String(10000000 + i) });
     const home = i < 7 ? region.zones[0] : pick(r, region.zones.slice(1, 5)); // most start in Sandton
     const p = jitter(r, home, 1.2); S.setPin(db, region, id, p.lat, p.lng);
     if (i % 4 === 0) S.buyPro(db, region, id);
