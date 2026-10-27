@@ -1,0 +1,61 @@
+{
+  "id": "za-jhb",
+  "name": "Johannesburg North",
+  "status": "pilot",
+  "country": "ZA",
+  "timezone": "Africa/Johannesburg",
+  "currency": "ZAR",
+  "brand": { "name": "SenDexk" },
+  "center": { "lat": -26.10, "lng": 28.05 },
+  "serviceRadiusKm": 22,
+  "cutoffs": {
+    "booking": "09:30",
+    "confirmation": "11:00",
+    "collectionWindow": ["11:30", "13:00"],
+    "deliveryDeadline": "18:00"
+  },
+  "zones": [
+    { "id": "SND", "name": "Sandton",   "lat": -26.107, "lng": 28.056, "outer": false },
+    { "id": "RSB", "name": "Rosebank",  "lat": -26.145, "lng": 28.041, "outer": false },
+    { "id": "BRY", "name": "Bryanston", "lat": -26.058, "lng": 28.020, "outer": false },
+    { "id": "RBG", "name": "Randburg",  "lat": -26.094, "lng": 27.994, "outer": false },
+    { "id": "FWY", "name": "Fourways",  "lat": -26.015, "lng": 28.010, "outer": false },
+    { "id": "MID", "name": "Midrand",   "lat": -25.990, "lng": 28.130, "outer": true }
+  ],
+  "vehicles": {
+    "motorbike":    { "label": "Motorbike (petrol)", "energy": "fuel",     "per100": 3.0,  "wearPerKm": 0.35, "maxKg": 12,  "maxStops": 10, "speedKmh": 28, "rangeKm": null },
+    "motorbike_ev": { "label": "Electric motorbike", "energy": "electric", "per100": 4.0,  "wearPerKm": 0.25, "maxKg": 12,  "maxStops": 10, "speedKmh": 28, "rangeKm": 90 },
+    "car":          { "label": "Car (petrol)",       "energy": "fuel",     "per100": 7.0,  "wearPerKm": 0.50, "maxKg": 60,  "maxStops": 16, "speedKmh": 24, "rangeKm": null },
+    "car_ev":       { "label": "Electric car",       "energy": "electric", "per100": 16.0, "wearPerKm": 0.50, "maxKg": 60,  "maxStops": 16, "speedKmh": 24, "rangeKm": 280 },
+    "van":          { "label": "Van (diesel)",       "energy": "fuel",     "per100": 11.5, "wearPerKm": 0.90, "maxKg": 400, "maxStops": 30, "speedKmh": 22, "rangeKm": null }
+  },
+  "pricing": {
+    "_note": "ILLUSTRATIVE VALUES - replace with measured data before any real use.",
+    "fuelPerLitre": 25,
+    "electricityPerKwh": 3,
+    "hourlyRate": 75,
+    "handlingPerStop": 3,
+    "platformShare": { "standard": 0.18, "pro": 0.10 },
+    "roadFactor": 1.35,
+    "dwellMinutes": 6,
+    "consolidationFactor": 0.5,
+    "outerZoneFee": 10,
+    "minParcelPrice": 35,
+    "messagingPerParcel": 1.5,
+    "minProfitPerRun": 25,
+    "minParcelsPerRun": 3,
+    "mergeKm": 6,
+    "rangeReserve": 0.2,
+    "proPassPrice": 299
+  },
+  "rules": {
+    "bannedCategories": ["cash", "jewellery", "firearms", "perishables", "livestock", "hazardous"],
+    "maxDeclaredValue": 2000,
+    "sizeClasses": { "small": 5, "medium": 15, "large": 40 },
+    "confirmationExpiryDays": 3,
+    "failedDeliveryMode": "same_day_return",
+    "deliveryCodeMaxAttempts": 5
+  },
+  "hotspots": { "cellKm": 2, "perDriver": 3, "forecastWeight": 0.5, "minGap": 2, "bonus": 20, "dailyBonusCap": 500 },
+  "payouts": { "holdbackPct": 10, "holdbackDays": 3 }
+}

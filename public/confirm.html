@@ -1,0 +1,14 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm delivery</title><link rel="stylesheet" href="app.css"></head><body>
+<h1>Confirm your delivery</h1><div id="info" class="card">Loading…</div><div id="mapbox"></div>
+<div class="card" id="act" hidden><button id="gps" class="alt">Use my current location</button><button id="yes">Confirm: I'll be here</button><button id="no" class="alt">I won't be available today</button><p id="msg"></p></div>
+<script src="app.js"></script><script>
+const token=new URLSearchParams(location.search).get('t');let pin=null,map;
+(async()=>{try{const o=await api('GET','/api/confirm/'+token);
+$('#info').innerHTML=`<b>${o.from}</b> is sending you a parcel on <b>${o.serviceDate}</b>.<br><span class=mute>Drag the pin to where you'll be to receive it.</span>`;
+pin={lat:o.lat,lng:o.lng};map=mapView($('#mapbox'),{zones:[{name:'Here',lat:o.lat,lng:o.lng}].concat(o.region.zones||[])});
+const reg=await api('GET','/api/region');map=mapView($('#mapbox'),reg,{pins:[{...pin,label:'Deliver here'}],onPin:(p)=>{pin=p;map.draw([{...p,label:'Deliver here'}])}});$('#act').hidden=false;
+if(o.confirmed)$('#msg').textContent='Already confirmed. You can move the pin and confirm again.'}catch(e){$('#info').innerHTML=`<span class=err>${e.message}</span>`}})();
+$('#gps').onclick=()=>navigator.geolocation?.getCurrentPosition(p=>{pin={lat:p.coords.latitude,lng:p.coords.longitude};map.draw([{...pin,label:'Deliver here'}])},()=>$('#msg').textContent='Could not read your location. Drag the pin instead.');
+$('#yes').onclick=async()=>{try{const r=await api('POST','/api/confirm/'+token,{available:true,...pin});$('#act').hidden=true;$('#info').innerHTML=`<p class=ok>Confirmed for ${r.serviceDate}.</p><p>Your delivery code:</p><div class=big>${r.deliveryCode}</div><p class=mute>Tell the driver this code when they hand over the parcel. Don't share it earlier.</p>`}catch(e){$('#msg').innerHTML=`<span class=err>${e.message}</span>`}};
+$('#no').onclick=async()=>{try{const r=await api('POST','/api/confirm/'+token,{available:false});$('#act').hidden=true;$('#info').innerHTML=`<p>No problem. We moved it to ${r.serviceDate} and will ask again.</p>`}catch(e){$('#msg').innerHTML=`<span class=err>${e.message}</span>`}};
+</script></body></html>

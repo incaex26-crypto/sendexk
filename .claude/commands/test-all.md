@@ -1,0 +1,1 @@
+Run `npm test` and `npm run simulate`. Report: tests passed/failed, the simulator's parcels delivered, runs, saving vs solo, and whether the ledger balanced. If anything failed, find the cause and propose a fix before changing code.

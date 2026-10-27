@@ -1,0 +1,20 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dispatch starter</title><link rel="stylesheet" href="app.css"></head><body>
+<h1 id="brand">Dispatch starter</h1><nav><a href="/">Book</a><a href="/driver.html">Driver</a><a href="/admin.html">Admin</a></nav>
+<div class="card"><h2>Book a same-day delivery</h2>
+<div class="row"><div><label>From zone</label><select id="from"></select></div><div><label>To zone</label><select id="to"></select></div></div>
+<label>Vehicle needed</label><select id="cls"><option value="bike">Motorbike / scooter</option><option value="car" selected>Car</option><option value="van">Van</option></select>
+<div class="row"><div><label>Your name</label><input id="sn" value="Zinc Bakery"></div><div><label>Recipient name</label><input id="rn" value="Sam"></div></div>
+<div id="quote" class="mute" style="margin-top:.6rem"></div>
+<button id="book">Book and pay (demo payment)</button><div id="out"></div></div>
+<script src="app.js"></script><script>
+let region;(async()=>{region=await api('GET','/api/region');$('#brand').textContent=region.brand.name+' · '+region.name;
+for(const s of['#from','#to'])$(s).innerHTML=region.zones.map(z=>`<option value="${z.id}">${z.name}</option>`).join('');$('#to').selectedIndex=1;
+['#from','#to','#cls'].forEach(s=>$(s).onchange=q);q()})();
+const zone=(id)=>region.zones.find(z=>z.id===id);
+async function q(){const body={pickup:zone($('#from').value),drop:zone($('#to').value),vehicleClass:$('#cls').value};
+try{const r=await api('POST','/api/quote',body);$('#quote').innerHTML=`Price: <b>${R(r.low)}–${R(r.cap)}</b> (you never pay more than ${R(r.cap)}) · delivery ${r.serviceDate}`}catch(e){$('#quote').innerHTML=`<span class=err>${e.message}</span>`}}
+$('#book').onclick=async()=>{try{const f=zone($('#from').value),t=zone($('#to').value);
+const o=await api('POST','/api/orders',{vehicleClass:$('#cls').value,weightKg:2,category:'parcel',sender:{name:$('#sn').value,phone:'0110000000'},recipient:{name:$('#rn').value,phone:'0830000000'},pickup:{lat:f.lat,lng:f.lng,address:f.name},drop:{lat:t.lat,lng:t.lng,address:t.name}});
+const p=await api('POST',`/api/orders/${o.order.id}/pay`);
+$('#out').innerHTML=`<p class="ok">Order #${o.order.id} paid. The recipient gets this link by SMS:</p><p><a href="${p.confirmUrl}">${location.origin}${p.confirmUrl}</a></p><p class="mute">Nothing is collected until they confirm.</p>`}catch(e){$('#out').innerHTML=`<p class=err>${e.message}</p>`}};
+</script></body></html>
