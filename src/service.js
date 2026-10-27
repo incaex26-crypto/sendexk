@@ -12,6 +12,7 @@ const C = require('./confirm');
 const batching = require('./batching');
 const hot = require('./hotspots');
 const ETA = require('./eta');
+const payments = require('./payments');
 
 const DAY = 86400000;
 const err = (status, message) => Object.assign(new Error(message), { status });
@@ -114,13 +115,30 @@ function createOrder(db, region, body, idemKey) {
   for (const k of ['recipient', 'sender']) if (!body[k]?.name || !body[k]?.phone) throw err(400, `${k}.name and ${k}.phone required`);
   return tx(db, () => {
     const res = db.prepare(`INSERT INTO orders (region_id,account_id,idem_key,status,service_date,vehicle_class,weight_kg,category,declared_cents,
-      pickup_name,pickup_phone,pickup_addr,pickup_lat,pickup_lng,drop_name,drop_phone,drop_addr,drop_lat,drop_lng,drop_zone,drop_outer,cap_cents,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      pickup_name,pickup_phone,pickup_addr,pickup_lat,pickup_lng,drop_name,drop_phone,drop_addr,drop_lat,drop_lng,drop_zone,drop_outer,cap_cents,payment_type,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       region.id, body.accountId || null, idemKey || null, 'awaiting_payment', q.serviceDate, body.vehicleClass, kg, body.category || 'general', declared,
       body.sender.name, body.sender.phone, body.pickup.address || null, body.pickup.lat, body.pickup.lng,
-      body.recipient.name, body.recipient.phone, body.drop.address || null, body.drop.lat, body.drop.lng, q.zone, q.outer ? 1 : 0, q.cap, clock.now(), clock.now());
+      body.recipient.name, body.recipient.phone, body.drop.address || null, body.drop.lat, body.drop.lng, q.zone, q.outer ? 1 : 0, q.cap, 'card', clock.now(), clock.now());
     const id = Number(res.lastInsertRowid);
     log(db, region.id, 'order', id, 'created', 'api', { cap: q.cap, serviceDate: q.serviceDate });
+
+    // Business wallet: check balance, reserve cap, advance straight to awaiting_confirmation.
+    if (body.accountId) {
+      const acc = db.prepare('SELECT * FROM accounts WHERE id=?').get(body.accountId);
+      if (acc && acc.kind === 'business') {
+        const bal = L.walletBalance(db, body.accountId);
+        if (bal < q.cap) throw err(402, `wallet balance (${bal} cents) is below the booking cap (${q.cap} cents)`);
+        L.walletReserve(db, region.id, body.accountId, id, q.cap);
+        db.prepare("UPDATE orders SET payment_type='wallet' WHERE id=?").run(id);
+        const t = C.newToken();
+        const o = getOrder(db, id);
+        const upd = moveOrder(db, o, 'awaiting_confirmation', { token_hash: t.hash, token_expires: clock.now() + region.rules.confirmationExpiryDays * DAY }, 'wallet', 'wallet_paid');
+        log(db, region.id, 'order', id, 'wallet_paid', 'system', { cap: q.cap });
+        return { order: upd, quote: q, replay: false, confirmToken: t.token };
+      }
+    }
+
     return { order: getOrder(db, id), quote: q, replay: false };
   });
 }
@@ -135,6 +153,69 @@ function markPaid(db, region, orderId, amountCents) {
     const t = C.newToken();
     const upd = moveOrder(db, o, 'awaiting_confirmation', { token_hash: t.hash, token_expires: clock.now() + region.rules.confirmationExpiryDays * DAY }, 'payment', 'paid');
     return { order: upd, confirmToken: t.token }; // token is texted to the recipient, never stored in clear
+  });
+}
+
+// ---------- payment link & webhook ----------
+/** Create a payment link for a card order. Returns {url, ref}. */
+function createPaymentLink(db, region, orderId) {
+  return tx(db, () => {
+    const o = getOrder(db, orderId);
+    if (o.status !== 'awaiting_payment') throw err(409, `order is ${o.status}`);
+    if (o.payment_type !== 'card') throw err(400, 'not a card payment order');
+    const { url, ref } = payments.getProvider().createLink(orderId, o.cap_cents);
+    db.prepare('UPDATE orders SET payment_ref=? WHERE id=?').run(ref, orderId);
+    log(db, region.id, 'order', orderId, 'payment_link_created', 'api', { ref });
+    return { url, ref };
+  });
+}
+
+/**
+ * Process an inbound payment webhook. Verifies signature, handles duplicates idempotently.
+ * rawBody must be the raw request bytes (string or Buffer) for signature verification.
+ */
+function processWebhook(db, region, rawBody, sig, secret) {
+  const provider = payments.getProvider();
+  if (!provider.verifySignature(rawBody, sig, secret)) throw err(400, 'invalid webhook signature');
+  const { ref, amountCents } = provider.parseWebhook(rawBody instanceof Buffer ? rawBody.toString() : rawBody);
+  if (!ref) throw err(400, 'missing ref in webhook payload');
+  const o = db.prepare('SELECT * FROM orders WHERE payment_ref=?').get(ref);
+  if (!o) throw err(404, `no order found for payment ref ${ref}`);
+  if (o.status !== 'awaiting_payment') return { alreadyProcessed: true, orderId: o.id }; // idempotent
+  return { ...markPaid(db, region, o.id, amountCents), alreadyProcessed: false };
+}
+
+// ---------- business wallet ----------
+function topUp(db, region, accountId, cents) {
+  if (!Number.isInteger(cents) || cents <= 0) throw err(400, 'amount must be a positive integer (cents)');
+  const acc = db.prepare('SELECT * FROM accounts WHERE id=?').get(accountId);
+  if (!acc) throw err(404, 'account not found');
+  if (acc.kind !== 'business') throw err(400, 'wallets are for business accounts only');
+  return tx(db, () => {
+    L.walletTopUp(db, region.id, accountId, cents);
+    log(db, region.id, 'account', accountId, 'wallet_topup', 'admin', { cents });
+    return { balance: L.walletBalance(db, accountId) };
+  });
+}
+const walletBalance = (db, accountId) => L.walletBalance(db, accountId);
+
+// ---------- cancel ----------
+/** Cancel an order in any non-terminal state. Refunds escrow to wallet (business) or refund_due (card). */
+function cancelOrder(db, region, orderId, actor = 'admin') {
+  return tx(db, () => {
+    const o = getOrder(db, orderId);
+    if (SM.TERMINAL.has(o.status)) throw err(409, `order is already ${o.status}`);
+    const upd = moveOrder(db, o, 'cancelled', {}, actor, 'cancelled');
+    const escrowed = -L.balance(db, `escrow:order:${orderId}`);
+    if (escrowed > 0) {
+      if (o.payment_type === 'wallet' && o.account_id) {
+        L.walletRefund(db, region.id, o.account_id, orderId, escrowed);
+      } else {
+        L.post(db, region.id, 'refund on cancel', `order:${orderId}`, [{ account: `escrow:order:${orderId}`, amount: escrowed }, { account: 'refund_due', amount: -escrowed }]);
+        log(db, region.id, 'order', orderId, 'refund_due', 'system', { cents: escrowed });
+      }
+    }
+    return upd;
   });
 }
 
@@ -178,8 +259,14 @@ function moveOrderSafe(db, o, fields, actor, type, status) {
 function expireOrder(db, region, o, why) {
   const upd = moveOrder(db, o, 'expired', {}, 'system', 'expired');
   const paid = db.prepare("SELECT COALESCE(SUM(-amount_cents),0) AS b FROM ledger WHERE account=?").get(`escrow:order:${o.id}`).b;
-  if (paid > 0) L.post(db, region.id, 'refund on expiry', `order:${o.id}`, [{ account: `escrow:order:${o.id}`, amount: paid }, { account: 'refund_due', amount: -paid }]);
-  log(db, region.id, 'order', o.id, 'refund_due', 'system', { cents: paid, why });
+  if (paid > 0) {
+    if (o.payment_type === 'wallet' && o.account_id) {
+      L.walletRefund(db, region.id, o.account_id, o.id, paid);
+    } else {
+      L.post(db, region.id, 'refund on expiry', `order:${o.id}`, [{ account: `escrow:order:${o.id}`, amount: paid }, { account: 'refund_due', amount: -paid }]);
+      log(db, region.id, 'order', o.id, 'refund_due', 'system', { cents: paid, why });
+    }
+  }
   return upd;
 }
 
@@ -311,8 +398,9 @@ function settle(db, region, o, run, isReturn = false) {
   const share = region.pricing.platformShare[driverTier(db.prepare('SELECT * FROM drivers WHERE id=?').get(run.driver_id))];
   // Driver is paid their share of the parcel price whether delivered or returned; returns are billed the same.
   const driverCents = Math.round((prices - msg) * (1 - share));
-  L.settleDelivery(db, region.id, o.id, { paidCents: paid, priceCents: prices, driverCents, messagingCents: msg, driverId: run.driver_id });
-  if (paid - prices > 0) log(db, region.id, 'order', o.id, 'refund_due', 'system', { cents: paid - prices });
+  const refundAccount = (o.payment_type === 'wallet' && o.account_id) ? `wallet:account:${o.account_id}` : 'refund_due';
+  L.settleDelivery(db, region.id, o.id, { paidCents: paid, priceCents: prices, driverCents, messagingCents: msg, driverId: run.driver_id, refundAccount });
+  if (paid - prices > 0 && o.payment_type !== 'wallet') log(db, region.id, 'order', o.id, 'refund_due', 'system', { cents: paid - prices });
 }
 
 function closeRunIfDone(db, region, run) {
@@ -418,6 +506,8 @@ function overview(db, region) {
 }
 
 module.exports = {
-  loadRegions, localParts, addDays, today, createAccount, createDriver, buyPro, quote, createOrder, markPaid, previewConfirm, confirm, sweepUnconfirmed,
-  dispatch, listOpenRuns, acceptRun, releaseRun, scan, ping, setPin, track, refreshHotspots, currentHotspots, runPayouts, releaseHoldbacks, overview, getOrder, driverTier, err,
+  loadRegions, localParts, addDays, today, createAccount, createDriver, buyPro, quote, createOrder, markPaid,
+  createPaymentLink, processWebhook, topUp, walletBalance, cancelOrder,
+  previewConfirm, confirm, sweepUnconfirmed,
+  dispatch, listOpenRuns, acceptRun, releaseRun, scan, ping, setPin, track, refreshHotspots, currentHotspots, runPayouts, releaseHoldbacks, overview, getOrder, driverTier, err, log,
 };

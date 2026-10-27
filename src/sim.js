@@ -17,7 +17,12 @@ const FLEET = [['Thabo', 'car_ev'], ['Lerato', 'car'], ['Sipho', 'motorbike'], [
 function populate(db, region, seed = 7) {
   const r = rng(seed), date = S.today(region);
   const shops = ['Zinc Bakery', 'Urban Threads', 'Kasi Kicks', 'Green Pharmacy Online', 'Bloom Florist', 'Nuts & Bolts', 'Book Nook', 'Glow Cosmetics']
-    .map((name, i) => { const z = region.zones[i % 4]; const loc = jitter(r, z, 0.8); return { id: S.createAccount(db, region, { kind: 'business', name, ...loc, address: `${name}, ${z.name}` }), name, loc, zone: z.id }; });
+    .map((name, i) => {
+      const z = region.zones[i % 4]; const loc = jitter(r, z, 0.8);
+      const id = S.createAccount(db, region, { kind: 'business', name, ...loc, address: `${name}, ${z.name}` });
+      S.topUp(db, region, id, 2_000_000); // 2 000 000 cents wallet credit per shop for the simulated day
+      return { id, name, loc, zone: z.id };
+    });
   const drivers = FLEET.map(([name, vehicle], i) => {
     const id = S.createDriver(db, region, { name, vehicle, phone: '07' + String(1000000 + i) });
     const home = i < 7 ? region.zones[0] : pick(r, region.zones.slice(1, 5)); // most start in Sandton
@@ -36,10 +41,11 @@ function bookOrders(db, region, world, n = 70) {
     const cls = r() < 0.55 ? 'bike' : r() < 0.9 ? 'car' : 'van', kg = cls === 'bike' ? 0.5 + r() * 4 : cls === 'car' ? 1 + r() * 20 : 20 + r() * 80;
     const drop = jitter(r, zone, 1.4);
     try {
-      const { order } = S.createOrder(db, region, { accountId: shop.id, vehicleClass: cls, weightKg: Math.round(kg * 10) / 10, category: 'parcel', sender: { name: shop.name, phone: '0110000000' },
+      const result = S.createOrder(db, region, { accountId: shop.id, vehicleClass: cls, weightKg: Math.round(kg * 10) / 10, category: 'parcel', sender: { name: shop.name, phone: '0110000000' },
         recipient: { name: 'Customer ' + (i + 1), phone: '08' + String(30000000 + i) }, pickup: { ...shop.loc, address: shop.name }, drop: { ...drop, address: zone.name } });
-      const paid = S.markPaid(db, region, order.id);
-      orders.push({ id: order.id, token: paid.confirmToken, zone, drop });
+      // Wallet orders are already paid; card orders still need markPaid (sim uses wallet accounts so this is always the wallet path).
+      const confirmToken = result.confirmToken || S.markPaid(db, region, result.order.id).confirmToken;
+      orders.push({ id: result.order.id, token: confirmToken, zone, drop });
     } catch (e) { if (e.status !== 422) throw e; }
   }
   return orders;

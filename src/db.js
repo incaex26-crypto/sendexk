@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS orders (
   drop_name TEXT, drop_phone TEXT, drop_addr TEXT, drop_lat REAL, drop_lng REAL, drop_zone TEXT, drop_outer INTEGER DEFAULT 0,
   drop_confirmed INTEGER DEFAULT 0, cap_cents INTEGER, price_cents INTEGER,
   token_hash TEXT, token_expires INTEGER, code_hash TEXT, code_attempts INTEGER DEFAULT 0,
-  run_id INTEGER, seq INTEGER, eta_mid INTEGER, fail_reason TEXT, created_at INTEGER, updated_at INTEGER);
+  run_id INTEGER, seq INTEGER, eta_mid INTEGER, fail_reason TEXT, created_at INTEGER, updated_at INTEGER,
+  payment_ref TEXT, payment_type TEXT);
 CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(region_id, status, service_date);
 CREATE TABLE IF NOT EXISTS runs (
   id INTEGER PRIMARY KEY, region_id TEXT, service_date TEXT, vehicle_class TEXT, status TEXT,
@@ -40,10 +41,20 @@ CREATE TABLE IF NOT EXISTS hotspots (region_id TEXT, cell TEXT, score REAL, lat 
 CREATE TABLE IF NOT EXISTS payouts (id INTEGER PRIMARY KEY, driver_id INTEGER, at INTEGER, amount_cents INTEGER, holdback_cents INTEGER, status TEXT);
 `;
 
+// Migration statements for existing production databases. Each is tried independently;
+// "duplicate column" errors are swallowed so they are safe to re-run.
+const MIGRATIONS = [
+  'ALTER TABLE orders ADD COLUMN payment_ref TEXT',
+  'ALTER TABLE orders ADD COLUMN payment_type TEXT',
+];
+
 function open(file = ':memory:') {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec(SCHEMA);
+  if (file !== ':memory:') {
+    for (const stmt of MIGRATIONS) { try { db.exec(stmt); } catch {} }
+  }
   return db;
 }
 
