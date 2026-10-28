@@ -7,8 +7,8 @@ N="${1:-3}"
 MODEL="${AUTOPILOT_MODEL:-sonnet}"
 # --max-turns does not exist in this build; use --max-budget-usd to cap spend per task.
 MAX_BUDGET="${AUTOPILOT_MAX_BUDGET_USD:-0.50}"
-# Verified against `claude --help`: --model, --max-budget-usd, --permission-mode all exist.
-CLAUDE_FLAGS=(--model "$MODEL" --max-budget-usd "$MAX_BUDGET" --permission-mode acceptEdits)
+# Verified against `claude --help`: --model, --max-budget-usd, --dangerously-skip-permissions all exist.
+CLAUDE_FLAGS=(--model "$MODEL" --max-budget-usd "$MAX_BUDGET" --dangerously-skip-permissions)
 
 merged=(); waiting=(); blocked=(); failed=()
 git checkout main -q && git pull -q || { echo "Cannot update main. Stopping."; exit 1; }
