@@ -14,6 +14,10 @@ test('returns null when nothing is todo', () => {
 test('blocked tasks are skipped', () => {
   assert.equal(nextTask('## T1 · a\nrisk: low\nstatus: blocked\n\n## T2 · b\nrisk: low\nstatus: todo\n').id, 'T2');
 });
+test('skip list hides attempted tasks (case-insensitive)', () => {
+  assert.equal(nextTask(sample, ['t2']).id, 'T3');
+  assert.equal(nextTask(sample, ['T2', 'T3']), null);
+});
 test('missing risk defaults to high', () => {
   assert.equal(parseBacklog('## T1 · a\nstatus: todo\n')[0].risk, 'high');
 });

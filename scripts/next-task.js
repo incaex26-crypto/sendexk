@@ -12,15 +12,18 @@ function parseBacklog(text) {
   });
 }
 
-function nextTask(text) {
-  return parseBacklog(text).find((t) => t.status === 'todo') || null;
+// skip: array of task ids to ignore (tasks already attempted or sitting in an open branch/PR)
+function nextTask(text, skip = []) {
+  const skipSet = new Set(skip.map((s) => s.trim().toUpperCase()).filter(Boolean));
+  return parseBacklog(text).find((t) => t.status === 'todo' && !skipSet.has(t.id)) || null;
 }
 
 module.exports = { parseBacklog, nextTask };
 
 if (require.main === module) {
   const file = process.argv[2] || 'docs/BACKLOG.md';
-  const t = nextTask(fs.readFileSync(file, 'utf8'));
+  const skip = (process.env.SKIP || '').split(',');
+  const t = nextTask(fs.readFileSync(file, 'utf8'), skip);
   if (!t) { console.error('No todo tasks left.'); process.exit(1); }
   console.log(JSON.stringify({ id: t.id, risk: t.risk }));
   console.log(t.body);
