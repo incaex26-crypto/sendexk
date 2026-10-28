@@ -14,7 +14,7 @@ function flowSetup() {
 
 test('full happy path: book -> pay -> confirm -> batch -> accept -> deliver -> payout, ledger balanced', () => {
   const { db, region, orders } = flowSetup();
-  const driver = S.createDriver(db, region, { name: 'Thabo', phone: '1', vehicle: 'car_ev' });
+  const driver = S.createDriver(db, region, { name: 'Thabo', phone: '0820000001', vehicle: 'car_ev' });
   const d = S.dispatch(db, region); assert.equal(d.runs.length, 1);
   const open = S.listOpenRuns(db, region, driver); assert.equal(open.length, 1);
   const acc = S.acceptRun(db, region, open[0].id, driver);

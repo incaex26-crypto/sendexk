@@ -1,20 +1,343 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dispatch starter</title><link rel="stylesheet" href="app.css"></head><body>
-<h1 id="brand">Dispatch starter</h1><nav><a href="/">Book</a><a href="/driver.html">Driver</a><a href="/admin.html">Admin</a></nav>
-<div class="card"><h2>Book a same-day delivery</h2>
-<div class="row"><div><label>From zone</label><select id="from"></select></div><div><label>To zone</label><select id="to"></select></div></div>
-<label>Vehicle needed</label><select id="cls"><option value="bike">Motorbike / scooter</option><option value="car" selected>Car</option><option value="van">Van</option></select>
-<div class="row"><div><label>Your name</label><input id="sn" value="Zinc Bakery"></div><div><label>Recipient name</label><input id="rn" value="Sam"></div></div>
-<div id="quote" class="mute" style="margin-top:.6rem"></div>
-<button id="book">Book and pay (demo payment)</button><div id="out"></div></div>
-<script src="app.js"></script><script>
-let region;(async()=>{region=await api('GET','/api/region');$('#brand').textContent=region.brand.name+' · '+region.name;
-for(const s of['#from','#to'])$(s).innerHTML=region.zones.map(z=>`<option value="${z.id}">${z.name}</option>`).join('');$('#to').selectedIndex=1;
-['#from','#to','#cls'].forEach(s=>$(s).onchange=q);q()})();
-const zone=(id)=>region.zones.find(z=>z.id===id);
-async function q(){const body={pickup:zone($('#from').value),drop:zone($('#to').value),vehicleClass:$('#cls').value};
-try{const r=await api('POST','/api/quote',body);$('#quote').innerHTML=`Price: <b>${R(r.low)}–${R(r.cap)}</b> (you never pay more than ${R(r.cap)}) · delivery ${r.serviceDate}`}catch(e){$('#quote').innerHTML=`<span class=err>${e.message}</span>`}}
-$('#book').onclick=async()=>{try{const f=zone($('#from').value),t=zone($('#to').value);
-const o=await api('POST','/api/orders',{vehicleClass:$('#cls').value,weightKg:2,category:'parcel',sender:{name:$('#sn').value,phone:'0110000000'},recipient:{name:$('#rn').value,phone:'0830000000'},pickup:{lat:f.lat,lng:f.lng,address:f.name},drop:{lat:t.lat,lng:t.lng,address:t.name}});
-const p=await api('POST',`/api/orders/${o.order.id}/pay`);
-$('#out').innerHTML=`<p class="ok">Order #${o.order.id} paid. The recipient gets this link by SMS:</p><p><a href="${p.confirmUrl}">${location.origin}${p.confirmUrl}</a></p><p class="mute">Nothing is collected until they confirm.</p>`}catch(e){$('#out').innerHTML=`<p class=err>${e.message}</p>`}};
-</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SenDexk — Book a delivery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+      integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="page">
+
+<header class="page-head">
+  <h1 id="brand">SenDexk</h1>
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <nav>
+      <a href="/" class="active">Book a delivery</a>
+      <a href="/track.html">Track</a>
+    </nav>
+    <button class="theme-btn" id="theme-btn" onclick="toggleTheme()">Dark mode</button>
+  </div>
+</header>
+
+<!-- Step indicators -->
+<div class="steps" id="steps-row">
+  <div class="step-item active" id="si-1">Addresses</div>
+  <div class="step-item" id="si-2">Parcel</div>
+  <div class="step-item" id="si-3">Choose window</div>
+  <div class="step-item" id="si-4">Pay</div>
+</div>
+
+<!-- Step 1: Addresses -->
+<div id="step-1">
+  <p class="text-mute">Click the map to set your pickup address, then your drop-off address. Or choose suburbs from the lists below.</p>
+
+  <div class="map-wrap">
+    <div id="map" style="height:380px"></div>
+    <div class="map-hint" id="map-hint">Click to set pickup address</div>
+  </div>
+
+  <div class="row" style="margin-bottom:8px">
+    <div class="field" style="margin-bottom:0">
+      <label>Pickup suburb</label>
+      <select id="from"></select>
+    </div>
+    <div class="field" style="margin-bottom:0">
+      <label>Drop-off suburb</label>
+      <select id="to"></select>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:20px">
+    <button class="btn btn-ghost btn-sm" onclick="resetPins()">Reset pins</button>
+    <span class="text-mute" id="addr-status"></span>
+  </div>
+
+  <button class="btn btn-primary" id="step1-next" disabled>Next — Parcel details</button>
+</div>
+
+<!-- Step 2: Parcel -->
+<div id="step-2" class="hidden">
+  <div class="row">
+    <div class="field">
+      <label>Weight (kg)</label>
+      <input id="weight" type="number" value="2" min="0.1" step="0.1">
+    </div>
+    <div class="field">
+      <label>Category</label>
+      <select id="category">
+        <option value="parcel">Parcel</option>
+        <option value="food">Food</option>
+        <option value="documents">Documents</option>
+      </select>
+    </div>
+  </div>
+
+  <p class="text-mute" style="margin-bottom:14px">Choose the vehicle size that fits your parcel.</p>
+  <div id="vehicle-cards"></div>
+
+  <div style="display:flex;gap:8px;margin-top:8px">
+    <button class="btn btn-ghost" onclick="goStep(1)">Back</button>
+    <button class="btn btn-primary" id="step2-next" disabled style="flex:1">Next — Choose delivery window</button>
+  </div>
+</div>
+
+<!-- Step 3: Delivery window board -->
+<div id="step-3" class="hidden">
+  <p class="text-mute" style="margin-bottom:14px">Select a delivery window. The price shown is fixed — you will not be charged more.</p>
+
+  <div class="board" id="board">
+    <div class="board-head"><strong id="board-date">—</strong> <span id="board-sub"></span></div>
+    <table>
+      <thead><tr><th>Window</th><th>Collection from</th><th>Delivery by</th><th>Price</th><th></th></tr></thead>
+      <tbody id="board-body">
+        <tr><td colspan="5" class="b-empty" style="padding:14px 0">Loading prices…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div style="display:flex;gap:8px">
+    <button class="btn btn-ghost" onclick="goStep(2)">Back</button>
+    <button class="btn btn-primary" id="step3-next" disabled style="flex:1">Next — Your details</button>
+  </div>
+</div>
+
+<!-- Step 4: Details + pay -->
+<div id="step-4" class="hidden">
+  <div class="card" id="order-summary" style="margin-bottom:20px"></div>
+
+  <h2 style="margin-top:0">Sender</h2>
+  <div class="row">
+    <div class="field"><label>Your name or business</label><input id="sname" placeholder="Zinc Bakery"></div>
+    <div class="field"><label>Phone number</label><input id="sphone" type="tel" placeholder="011 000 0000"></div>
+  </div>
+
+  <h2>Recipient</h2>
+  <div class="row">
+    <div class="field"><label>Name</label><input id="rname" placeholder="Sam Dlamini"></div>
+    <div class="field"><label>Phone number</label><input id="rphone" type="tel" placeholder="082 000 0000"></div>
+  </div>
+
+  <div id="pay-price" class="amount-lg" style="margin:20px 0 6px;color:var(--accent)"></div>
+  <p class="text-mute" style="margin-bottom:20px" id="pay-note">Fixed price. Nothing collected until the recipient confirms their address.</p>
+
+  <button class="btn btn-primary" id="pay-btn">Pay now</button>
+  <p class="text-err" id="pay-err" style="margin-top:10px;min-height:1.2em"></p>
+
+  <div id="pay-done" class="hidden" style="margin-top:20px"></div>
+
+  <div style="margin-top:12px">
+    <button class="btn btn-ghost btn-sm" onclick="goStep(3)">Back</button>
+  </div>
+</div>
+
+</div><!-- .page -->
+
+<script src="app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"
+        integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"
+        integrity="sha384-QfbOCebHNw8pQiPAOd2IFee2v2A5VYZxBk0+JGZ5H+3mfzVIp6zsQNkTsfGJot93" crossorigin="anonymous"></script>
+<script>
+const CLASSES = [
+  { id: 'motorbike', label: 'Motorbike', desc: 'Up to 5 kg, small parcels and documents' },
+  { id: 'car',       label: 'Car',       desc: 'Up to 25 kg, most parcels' },
+  { id: 'van',       label: 'Van',       desc: 'Heavy or bulky items' },
+];
+
+let region = null, pickup = null, drop = null, selectedClass = null, _map = null, _quote = null;
+
+(async () => {
+  region = await api('GET', '/api/region');
+  document.title = region.brand.name + ' — Book a delivery';
+  $('#brand').textContent = region.brand.name;
+
+  const opts = region.zones.map(z => `<option value="${z.id}">${z.name}</option>`).join('');
+  $('#from').innerHTML = opts;
+  $('#to').innerHTML = opts;
+  $('#to').selectedIndex = Math.min(1, region.zones.length - 1);
+  ['#from', '#to'].forEach(s => $(s).onchange = onZoneChange);
+
+  _map = tileMap($('#map'), region, {
+    height: '380px', zoom: 11,
+    onPickup: p => { pickup = { ...p }; updatePins(); checkStep1(); },
+    onDrop:   p => { drop   = { ...p }; updatePins(); checkStep1(); },
+  });
+
+  onZoneChange();
+  renderVehicleCards();
+})();
+
+// ── Step navigation ──────────────────────────────────────────────────────────
+function goStep(n) {
+  for (let i = 1; i <= 4; i++) {
+    $('#step-' + i).classList.toggle('hidden', i !== n);
+    const si = $('#si-' + i);
+    si.classList.remove('active', 'done');
+    if (i < n)  si.classList.add('done');
+    if (i === n) si.classList.add('active');
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ── Step 1: Addresses ────────────────────────────────────────────────────────
+function onZoneChange() {
+  const f = region.zones.find(z => z.id === $('#from').value);
+  const t = region.zones.find(z => z.id === $('#to').value);
+  pickup = { lat: f.lat, lng: f.lng, addr: f.name };
+  drop   = { lat: t.lat, lng: t.lng, addr: t.name };
+  updatePins();
+  checkStep1();
+}
+
+function updatePins() {
+  if (!_map) return;
+  const pins = [];
+  if (pickup) pins.push({ lat: pickup.lat, lng: pickup.lng, type: 'pickup', label: 'P',
+    popup: `<b>Pickup</b><br>${pickup.addr || ''}`, draggable: true,
+    onDrag: p => { pickup = { ...pickup, ...p }; checkStep1(); } });
+  if (drop)   pins.push({ lat: drop.lat,   lng: drop.lng,   type: 'drop',   label: 'D',
+    popup: `<b>Drop-off</b><br>${drop.addr || ''}`, draggable: true,
+    onDrag: p => { drop   = { ...drop, ...p   }; checkStep1(); } });
+  _map.setMarkers(pins);
+  const h = !pickup ? 'Click to set pickup address'
+          : !drop   ? 'Pickup set — click to set drop-off address'
+          :            'Drag pins to adjust';
+  $('#map-hint').textContent = h;
+  $('#addr-status').textContent = pickup && drop
+    ? `${pickup.addr || 'Pickup'} → ${drop.addr || 'Drop-off'}`
+    : '';
+}
+
+function resetPins() {
+  pickup = null; drop = null;
+  if (_map) _map.setMarkers([]);
+  $('#map-hint').textContent = 'Click to set pickup address';
+  $('#addr-status').textContent = '';
+  $('#step1-next').disabled = true;
+}
+
+function checkStep1() {
+  $('#step1-next').disabled = !(pickup && drop);
+}
+
+$('#step1-next').onclick = () => goStep(2);
+
+// ── Step 2: Parcel + vehicle ─────────────────────────────────────────────────
+function renderVehicleCards() {
+  $('#vehicle-cards').innerHTML = CLASSES.map(c => `
+    <div class="card" style="cursor:pointer;border-color:${selectedClass===c.id?'var(--accent)':'var(--line)'};padding:14px 16px;margin-bottom:10px"
+         id="vc-${c.id}" onclick="selectVehicle('${c.id}')">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-weight:600">${c.label}</div>
+          <div class="text-mute">${c.desc}</div>
+        </div>
+        <div style="width:22px;height:22px;border-radius:50%;border:2px solid var(--line);background:${selectedClass===c.id?'var(--accent)':'transparent'};flex-shrink:0"></div>
+      </div>
+    </div>`).join('');
+}
+
+function selectVehicle(id) {
+  selectedClass = id;
+  renderVehicleCards();
+  $('#step2-next').disabled = false;
+}
+
+$('#step2-next').onclick = async () => {
+  await loadBoard();
+  goStep(3);
+};
+
+// ── Step 3: Delivery window board ────────────────────────────────────────────
+async function loadBoard() {
+  $('#board-body').innerHTML = '<tr><td colspan="5" class="b-empty" style="padding:14px 0">Getting price…</td></tr>';
+  try {
+    _quote = await api('POST', '/api/quote', {
+      pickup, drop, vehicleClass: selectedClass,
+    });
+    const co = region.cutoffs;
+    const cls = CLASSES.find(c => c.id === selectedClass);
+    $('#board-date').textContent = fmtDate(_quote.serviceDate);
+    $('#board-sub').textContent = '';
+    $('#board-body').innerHTML = `
+      <tr>
+        <td class="b-class">Same-day delivery</td>
+        <td class="b-window">${co.collectionWindow[0]}</td>
+        <td class="b-window">${co.deliveryDeadline}</td>
+        <td class="b-price">${R(_quote.cap)}</td>
+        <td><button class="sel-btn selected" disabled>Selected</button></td>
+      </tr>`;
+    $('#step3-next').disabled = false;
+    updateSummary();
+  } catch (e) {
+    $('#board-body').innerHTML = `<tr><td colspan="5" class="b-empty" style="padding:14px 0">${e.message}. Go back and check your addresses.</td></tr>`;
+  }
+}
+
+$('#step3-next').onclick = () => goStep(4);
+
+function updateSummary() {
+  if (!_quote) return;
+  const cls = CLASSES.find(c => c.id === selectedClass);
+  $('#order-summary').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+      <div>
+        <div class="text-mute" style="font-size:.75rem;margin-bottom:4px">Delivery summary</div>
+        <div><b>${pickup.addr || 'Pickup'}</b> to <b>${drop.addr || 'Drop-off'}</b></div>
+        <div class="text-mute">${cls ? cls.label : ''} · ${fmtDate(_quote.serviceDate)}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="text-mute" style="font-size:.75rem;margin-bottom:2px">Fixed price</div>
+        <div class="amount-lg" style="color:var(--accent)">${R(_quote.cap)}</div>
+      </div>
+    </div>`;
+  $('#pay-price').textContent = R(_quote.cap);
+}
+
+// ── Step 4: Pay ───────────────────────────────────────────────────────────────
+$('#pay-btn').onclick = async () => {
+  const btn = $('#pay-btn');
+  btn.disabled = true; btn.textContent = 'Processing…';
+  $('#pay-err').textContent = '';
+  try {
+    const o = await api('POST', '/api/orders', {
+      vehicleClass: selectedClass,
+      weightKg: parseFloat($('#weight').value) || 2,
+      category: $('#category').value,
+      sender:    { name: $('#sname').value || 'Sender',    phone: $('#sphone').value || '0110000000' },
+      recipient: { name: $('#rname').value || 'Recipient', phone: $('#rphone').value || '0830000000' },
+      pickup: { lat: pickup.lat, lng: pickup.lng, address: pickup.addr || 'Pickup' },
+      drop:   { lat: drop.lat,   lng: drop.lng,   address: drop.addr   || 'Drop-off' },
+    });
+    const p = await api('POST', `/api/orders/${o.order.id}/pay`);
+    $('#pay-done').classList.remove('hidden');
+    $('#pay-done').innerHTML = `
+      <div class="card">
+        <div style="font-weight:600;color:var(--ok);margin-bottom:10px">Order placed</div>
+        <p style="margin-bottom:10px">
+          Send this link to <b>${$('#rname').value || 'the recipient'}</b> by SMS.
+          They must confirm their address before we collect your parcel.
+        </p>
+        <div style="margin-bottom:14px;padding:10px 12px;background:var(--faint);border-radius:var(--radius);font-size:.88rem;word-break:break-all">
+          ${location.origin}${p.confirmUrl}
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <a href="${p.confirmUrl}" class="btn btn-secondary btn-sm" target="_blank" rel="noopener">Open confirmation page</a>
+          <a href="/track.html?id=${o.order.id}" class="btn btn-ghost btn-sm">Track this order</a>
+        </div>
+      </div>`;
+    btn.textContent = 'Order placed';
+    pickup = null; drop = null; selectedClass = null; _quote = null;
+  } catch (e) {
+    $('#pay-err').textContent = e.message + '. Please try again.';
+    btn.disabled = false; btn.textContent = 'Pay now';
+  }
+};
+</script>
+</body>
+</html>

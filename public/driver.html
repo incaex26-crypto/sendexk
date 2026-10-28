@@ -1,122 +1,329 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Driver</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Driver — SenDexk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+      integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
 <link rel="stylesheet" href="app.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-</head><body>
-<h1>Driver</h1><nav><a href="/">Book</a><a href="/driver.html">Driver</a><a href="/admin.html">Admin</a></nav>
-<div class="card"><label>Driver id (starter login; use phone OTP in production)</label><div class="row"><input id="did" type="number" value="1"><button id="go">Open</button></div></div>
-<div id="run-map" style="width:100%;height:320px;display:none;border-radius:8px;overflow:hidden;margin:1rem 0;position:relative"></div>
-<div id="me"></div><div id="runs"></div>
+<style>
+  .driver-layout { display: flex; flex-direction: column; min-height: 100vh; }
+  .stop-list { list-style: none; padding: 0; margin: 0; }
+  .stop-item { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: flex-start; }
+  .stop-item:last-child { border-bottom: none; }
+  .stop-num { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-size: .78rem; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+  .stop-addr { flex: 1; font-size: .9rem; line-height: 1.45; }
+  .stop-type { font-size: .72rem; color: var(--mute); margin-bottom: 1px; font-weight: 500; }
+  .run-pay { font-size: 2.2rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); line-height: 1; }
+  .run-meta { color: var(--mute); font-size: .85rem; margin-top: 4px; }
+  .code-scan { background: var(--faint); border-radius: var(--radius); padding: 16px; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="driver-layout">
+
+<!-- Map — full width, top half -->
+<div class="map-wrap" style="border-radius:0;margin:0;flex-shrink:0">
+  <div id="map" style="height:50vh;min-height:200px"></div>
+</div>
+
+<!-- Panel below map -->
+<div class="page" style="padding-top:18px;flex:1">
+
+<header class="page-head" style="margin-bottom:16px">
+  <h1>Your driver</h1>
+  <div style="display:flex;gap:10px;align-items:center">
+    <button class="theme-btn" id="theme-btn" onclick="toggleTheme()">Dark mode</button>
+  </div>
+</header>
+
+<!-- Login panel (shown until logged in) -->
+<div id="login-panel" class="card">
+  <h2 style="margin-top:0">Log in with your phone number</h2>
+  <div class="field">
+    <label>Phone number</label>
+    <input id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="082 123 4567">
+  </div>
+  <button class="btn btn-primary" id="send-btn">Send code</button>
+
+  <div id="code-row" class="hidden" style="margin-top:16px">
+    <div class="field">
+      <label>6-digit code</label>
+      <input id="code" type="tel" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="• • • • • •">
+    </div>
+    <button class="btn btn-primary" id="verify-btn">Log in</button>
+  </div>
+
+  <p id="login-msg" class="text-mute" style="margin-top:10px;min-height:1.2em"></p>
+</div>
+
+<!-- Driver content (shown after login) -->
+<div id="driver-panel" class="hidden">
+
+  <!-- Driver info bar -->
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px">
+    <div id="driver-name" style="font-weight:600"></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn btn-ghost btn-sm" id="pin-btn">Share location</button>
+      <button class="btn btn-ghost btn-sm" id="logout-btn">Log out</button>
+    </div>
+  </div>
+
+  <!-- Run panel -->
+  <div id="run-panel">
+    <p class="text-mute">No runs assigned to you right now. Check back soon.</p>
+  </div>
+
+  <!-- Delivery code entry -->
+  <div id="scan-panel" class="code-scan hidden">
+    <h2 style="margin-top:0">Enter delivery code</h2>
+    <p class="text-mute" style="margin-bottom:12px">Ask the recipient for their 4-character code before handing over the parcel.</p>
+    <div style="display:flex;gap:8px">
+      <input id="scan-input" type="tel" inputmode="numeric" maxlength="6"
+             placeholder="Code" style="width:auto;flex:1;font-size:1.2rem;letter-spacing:.12em;text-transform:uppercase">
+      <button class="btn btn-primary btn-sm" style="width:auto" id="scan-btn">Confirm</button>
+    </div>
+    <p id="scan-msg" class="text-mute" style="margin-top:8px;min-height:1.2em"></p>
+  </div>
+
+</div>
+
+</div>
+</div>
 
 <script src="app.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"
+        integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"
+        integrity="sha384-QfbOCebHNw8pQiPAOd2IFee2v2A5VYZxBk0+JGZ5H+3mfzVIp6zsQNkTsfGJot93" crossorigin="anonymous"></script>
 <script>
-let H={}, _region=null, _map=null, _protocolAdded=false;
+// Session token stored only in localStorage; fails quietly in private mode
+const session = {
+  get() { try { return localStorage.getItem('driverToken'); } catch { return null; } },
+  set(t) { try { t ? localStorage.setItem('driverToken', t) : localStorage.removeItem('driverToken'); } catch {} },
+};
 
-async function fetchRegion(){if(!_region)_region=await api('GET','/api/region');return _region;}
+let _H = {}, _map = null, _region = null, _currentRun = null, _currentParcelId = null;
 
-$('#go').onclick=load;
+(async () => {
+  _region = await api('GET', '/api/region').catch(() => null);
+  _map = tileMap($('#map'), _region, { height: '50vh', zoom: 12 });
+  const saved = session.get();
+  if (saved) { setAuth(saved); await loadDriver(); }
+})();
 
-async function load(){
-  H={'x-driver-id':$('#did').value};
-  try{
-    const [m, region]=await Promise.all([api('GET','/api/driver/me',null,H), fetchRegion()]);
-    $('#me').innerHTML=`<div class="card"><b>${m.driver.name}</b> <span class=pill>${m.driver.vehicle}</span> <span class=pill>${m.driver.tier}</span>
-${m.driver.tier==='standard'?'<button id="pro" class="alt">Get Pro for 30 days (lower platform share)</button>':''}
-<button id="pin" class="alt">Send my location now</button></div>`;
-    $('#pro')&&($('#pro').onclick=async()=>{await api('POST','/api/driver/pro',{},H);load()});
-    $('#pin').onclick=()=>navigator.geolocation?.getCurrentPosition(p=>api('POST','/api/driver/ping',{lat:p.coords.latitude,lng:p.coords.longitude},H).then(()=>alert('Sent')));
-    if(m.run){
-      $('#runs').innerHTML=`<h2>Your run #${m.run.id} · ${R(m.run.payoutCents)}</h2>`+m.parcels.map(p=>`<div class="card"><b>#${p.id}</b> ${p.pickup_name} → ${p.drop_name} <span class=pill>${p.status}</span><div class=mute>${p.drop_addr||''}</div><div id="a${p.id}"></div></div>`).join('');
-      m.parcels.forEach(p=>actions(p));
-      showRunMap(m.parcels, region);
-    } else {
-      hideMap();
-      const rs=await api('GET','/api/driver/runs',null,H);
-      $('#runs').innerHTML='<h2>Open runs</h2>'+(rs.length?rs.map(r=>`<div class="card"><div class=big>${R(r.payoutCents)}</div>${r.parcels} parcels · ${r.km} km · ~${r.minutes} min${r.bonusCents?` <span class=pill>incl. ${R(r.bonusCents)} hotspot bonus</span>`:''}<button data-r="${r.id}">Accept</button></div>`).join(''):'<p class=mute>No runs right now.</p>');
-      document.querySelectorAll('[data-r]').forEach(b=>b.onclick=async()=>{try{await api('POST',`/api/driver/runs/${b.dataset.r}/accept`,{},H);load()}catch(e){alert(e.message);load()}});
-    }
-  }catch(e){$('#me').innerHTML=`<p class=err>${e.message}</p>`}
+function setAuth(token) {
+  session.set(token);
+  _H = token ? { authorization: 'Bearer ' + token } : {};
+  $('#login-panel').classList.toggle('hidden', !!token);
+  $('#driver-panel').classList.toggle('hidden', !token);
 }
 
-function hideMap(){
-  const el=document.getElementById('run-map');
-  if(el)el.style.display='none';
-  if(_map){_map.remove();_map=null;}
-}
+// ── Login ────────────────────────────────────────────────────────────────────
+$('#send-btn').onclick = async () => {
+  const phone = $('#phone').value.trim();
+  if (!phone) { $('#login-msg').textContent = 'Enter your phone number first.'; return; }
+  $('#send-btn').disabled = true;
+  try {
+    const r = await api('POST', '/api/auth/otp', { phone });
+    $('#code-row').classList.remove('hidden');
+    $('#login-msg').textContent = r.devCode
+      ? `Test mode — your code is ${r.devCode}`
+      : 'If this number belongs to a driver, a code has been sent.';
+    $('#code').focus();
+  } catch (e) {
+    $('#login-msg').textContent = e.message + '. Please try again.';
+  } finally { $('#send-btn').disabled = false; }
+};
+$('#phone').addEventListener('keydown', e => { if (e.key === 'Enter') $('#send-btn').click(); });
 
-function showRunMap(parcels, region){
-  const el=document.getElementById('run-map');
-  if(!el||!parcels.length||!window.maplibregl||!window.pmtiles){return hideMap();}
-  el.style.display='block';
+$('#verify-btn').onclick = async () => {
+  $('#verify-btn').disabled = true;
+  try {
+    const r = await api('POST', '/api/auth/verify', { phone: $('#phone').value.trim(), code: $('#code').value.trim() });
+    setAuth(r.token);
+    await loadDriver();
+  } catch (e) {
+    $('#login-msg').textContent = e.message + '. Check your code and try again.';
+  } finally { $('#verify-btn').disabled = false; }
+};
+$('#code').addEventListener('keydown', e => { if (e.key === 'Enter') $('#verify-btn').click(); });
 
-  // Register protocol once
-  if(!_protocolAdded){
-    const protocol=new pmtiles.Protocol();
-    maplibregl.addProtocol('pmtiles',protocol.tile.bind(protocol));
-    _protocolAdded=true;
+$('#logout-btn').onclick = async () => {
+  try { await api('POST', '/api/auth/logout', {}, _H); } catch {}
+  setAuth(null);
+  $('#run-panel').innerHTML = '';
+  $('#scan-panel').classList.add('hidden');
+  $('#login-msg').textContent = 'You have been logged out.';
+};
+
+$('#pin-btn').onclick = () => {
+  navigator.geolocation?.getCurrentPosition(
+    p => api('POST', '/api/driver/ping', { lat: p.coords.latitude, lng: p.coords.longitude }, _H)
+           .then(() => { $('#pin-btn').textContent = 'Location sent'; setTimeout(() => { $('#pin-btn').textContent = 'Share location'; }, 3000); })
+           .catch(e => { $('#pin-btn').textContent = 'Could not send'; }),
+    () => { $('#pin-btn').textContent = 'Location unavailable'; },
+  );
+};
+
+// ── Driver data ──────────────────────────────────────────────────────────────
+async function loadDriver() {
+  let me;
+  try {
+    me = await api('GET', '/api/driver/me', null, _H);
+  } catch (e) {
+    if (e.status === 401) { setAuth(null); return; }
+    $('#run-panel').innerHTML = `<p class="text-err">${e.message}. Pull down to retry.</p>`;
+    return;
   }
 
-  const tilesPath=(region.map&&region.map.tilesUrl)||'/maps/jhb.pmtiles';
-  const tileUrl='pmtiles://'+window.location.origin+tilesPath;
+  $('#driver-name').textContent = me.driver.name;
 
-  const style={
-    version:8,
-    sources:{protomaps:{type:'vector',url:tileUrl,attribution:'© <a href="https://openstreetmap.org">OpenStreetMap</a> contributors'}},
-    layers:[
-      {id:'bg',type:'background',paint:{'background-color':'#f0ece6'}},
-      {id:'earth',type:'fill',source:'protomaps','source-layer':'earth',paint:{'fill-color':'#f0ece6'}},
-      {id:'water',type:'fill',source:'protomaps','source-layer':'water',paint:{'fill-color':'#a8d4e6'}},
-      {id:'landuse',type:'fill',source:'protomaps','source-layer':'landuse',paint:{'fill-color':'#dff0d0','fill-opacity':0.6}},
-      {id:'buildings',type:'fill',source:'protomaps','source-layer':'buildings',minzoom:13,paint:{'fill-color':'#d8d4cc','fill-outline-color':'#b8b3ab'}},
-      {id:'roads_minor',type:'line',source:'protomaps','source-layer':'roads',paint:{'line-color':'#ffffff','line-width':['interpolate',['linear'],['zoom'],11,1,16,4]}},
-      {id:'roads_major',type:'line',source:'protomaps','source-layer':'roads',filter:['in',['get','pmap:kind'],['literal',['primary','secondary','trunk','highway']]],paint:{'line-color':'#f0d878','line-width':['interpolate',['linear'],['zoom'],10,2,16,8]}},
-    ]
-  };
+  if (me.run) {
+    _currentRun = me.run;
+    renderRun(me.run, me.parcels || []);
+  } else {
+    const runs = await api('GET', '/api/driver/runs', null, _H).catch(() => []);
+    renderOpenRuns(runs);
+  }
+}
 
-  if(_map){_map.remove();_map=null;}
+function renderOpenRuns(runs) {
+  if (!runs.length) {
+    $('#run-panel').innerHTML = '<p class="text-mute">No runs available right now. Check back soon.</p>';
+    $('#scan-panel').classList.add('hidden');
+    return;
+  }
+  $('#run-panel').innerHTML = runs.map(r => `
+    <div class="card" style="margin-bottom:12px" id="rc-${r.id}">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+        <div>
+          <div class="run-pay">${R(r.payoutCents)}</div>
+          <div class="run-meta">${r.parcels} parcel${r.parcels !== 1 ? 's' : ''} · ${r.km} km · ~${r.minutes} min</div>
+        </div>
+        <span class="badge badge-mute">Run #${r.id}</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" style="flex:1" data-accept="${r.id}">Accept run for ${R(r.payoutCents)}</button>
+        <button class="btn btn-ghost btn-sm" data-decline="${r.id}">Decline</button>
+      </div>
+    </div>`).join('');
 
-  const fallback=[region.center.lng,region.center.lat];
-  const fp=parcels.find(p=>p.pickup_lat&&p.pickup_lng);
-  _map=new maplibregl.Map({container:el,style,center:fp?[fp.pickup_lng,fp.pickup_lat]:fallback,zoom:12,attributionControl:true});
-
-  _map.on('error',()=>{
-    // Tiles not downloaded yet — show message without crashing
-    if(_map){_map.remove();_map=null;}
-    el.innerHTML='<div style="padding:2rem;text-align:center;color:#666;font-size:.9rem">Map tiles not available.<br>Run: <code>node scripts/get-map.js</code></div>';
-    el.style.display='block';
+  $$('[data-accept]').forEach(btn => btn.onclick = async () => {
+    btn.disabled = true; btn.textContent = 'Accepting…';
+    try {
+      await api('POST', `/api/driver/runs/${btn.dataset.accept}/accept`, {}, _H);
+      await loadDriver();
+    } catch (e) {
+      btn.disabled = false; btn.textContent = `Accept run for ${R(runs.find(r=>r.id==btn.dataset.accept).payoutCents)}`;
+      btn.insertAdjacentHTML('afterend', `<p class="text-err" style="margin-top:4px">${e.message}</p>`);
+    }
   });
 
-  _map.on('load',()=>{
-    const bounds=new maplibregl.LngLatBounds();
-    let hasCoords=false;
-    parcels.forEach((p,i)=>{
-      const seq=String(i+1);
-      if(p.pickup_lat&&p.pickup_lng){
-        hasCoords=true; bounds.extend([p.pickup_lng,p.pickup_lat]);
-        const d=document.createElement('div');
-        d.title=`Pickup ${seq}: ${p.pickup_name}`;
-        d.style.cssText='width:26px;height:26px;border-radius:50%;background:#e8590c;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:bold;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.3)';
-        d.textContent=seq;
-        new maplibregl.Marker({element:d}).setLngLat([p.pickup_lng,p.pickup_lat]).setPopup(new maplibregl.Popup({offset:16}).setHTML(`<b>Pickup #${seq}</b><br>${p.pickup_name}`)).addTo(_map);
-      }
-      if(p.drop_lat&&p.drop_lng){
-        hasCoords=true; bounds.extend([p.drop_lng,p.drop_lat]);
-        const d=document.createElement('div');
-        d.title=`Drop ${seq}: ${p.drop_name}`;
-        d.style.cssText='width:26px;height:26px;border-radius:4px;background:#c01515;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:bold;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.3)';
-        d.textContent=seq;
-        new maplibregl.Marker({element:d}).setLngLat([p.drop_lng,p.drop_lat]).setPopup(new maplibregl.Popup({offset:16}).setHTML(`<b>Drop #${seq}</b><br>${p.drop_name}`)).addTo(_map);
-      }
-    });
-    if(hasCoords&&!bounds.isEmpty())_map.fitBounds(bounds,{padding:60,maxZoom:15});
+  $$('[data-decline]').forEach(btn => btn.onclick = async () => {
+    if (!confirm('Decline this run?')) return;
+    try { await api('POST', `/api/driver/runs/${btn.dataset.decline}/release`, {}, _H); await loadDriver(); }
+    catch (e) { btn.insertAdjacentHTML('afterend', `<p class="text-err">${e.message}</p>`); }
   });
 }
 
-function actions(p){const el=$('#a'+p.id),nxt={batched:['collect','Collected'],collected:['out','Out for delivery'],out_for_delivery:null}[p.status];
-if(nxt)el.innerHTML=`<button data-x="${nxt[0]}">${nxt[1]}</button>`;
-else if(p.status==='out_for_delivery')el.innerHTML=`<input placeholder="Recipient's 4-digit code" id="c${p.id}" inputmode="numeric"><button data-x="deliver">Delivered</button><button class="alt" data-x="fail">Could not deliver</button>`;
-else if(p.status==='failed')el.innerHTML=`<button data-x="return">Returned to sender</button>`;
-el.querySelectorAll('[data-x]').forEach(b=>b.onclick=async()=>{const a=b.dataset.x,body={action:a};if(a==='deliver')body.code=$('#c'+p.id).value;if(a==='fail')body.reason='recipient unreachable';
-try{await api('POST','/api/driver/scan/'+p.id,body,H);load()}catch(e){alert(e.message)}})}
-</script></body></html>
+function renderRun(run, parcels) {
+  _currentRun = run;
+  const stops = parcels.map((p, i) => `
+    <li class="stop-item" id="stop-${p.id}">
+      <span class="stop-num">${i + 1}</span>
+      <div class="stop-addr">
+        <div class="stop-type">${p.status === 'batched' || p.status === 'collected' ? 'Pick up' : 'Drop off'}</div>
+        <div>${p.drop_addr || p.pickup_addr || 'Address not set'}</div>
+        <div class="text-mute" style="font-size:.78rem">${p.drop_name || p.pickup_name || ''}</div>
+        <div id="act-${p.id}" style="margin-top:8px"></div>
+      </div>
+    </li>`).join('');
+
+  $('#run-panel').innerHTML = `
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+      <div>
+        <h2 style="margin:0 0 2px">Run #${run.id}</h2>
+        <div class="text-mute">${parcels.length} parcel${parcels.length !== 1 ? 's' : ''}</div>
+      </div>
+      <div class="run-pay">${R(run.payoutCents)}</div>
+    </div>
+    <ul class="stop-list">${stops}</ul>`;
+
+  parcels.forEach(p => renderActions(p));
+
+  if (_map) {
+    _map.setMarkers(parcels.map((p, i) => ({
+      lat: p.drop_lat || p.pickup_lat, lng: p.drop_lng || p.pickup_lng,
+      type: p.status === 'batched' ? 'pickup' : 'drop',
+      label: String(i + 1),
+      popup: `<b>${i + 1}.</b> ${p.drop_addr || p.pickup_addr || ''}`,
+    })));
+  }
+
+  const hasScan = parcels.some(p => p.status === 'out_for_delivery');
+  $('#scan-panel').classList.toggle('hidden', !hasScan);
+}
+
+function renderActions(p) {
+  const el = $('#act-' + p.id);
+  if (!el) return;
+  const next = {
+    batched:          { action: 'collect',  label: 'Mark collected' },
+    collected:        { action: 'out',      label: 'Start delivery' },
+    out_for_delivery: null,
+  }[p.status];
+
+  if (next) {
+    el.innerHTML = `<button class="btn btn-secondary btn-sm" data-pid="${p.id}" data-action="${next.action}">${next.label}</button>`;
+    el.querySelector('button').onclick = async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true; btn.textContent = 'Updating…';
+      const body = { action: next.action };
+      if (next.action === 'out') {
+        const pos = await new Promise(res => navigator.geolocation?.getCurrentPosition(
+          p => res({ lat: p.coords.latitude, lng: p.coords.longitude }), () => res({})));
+        Object.assign(body, pos);
+      }
+      try { await api('POST', `/api/driver/scan/${p.id}`, body, _H); await loadDriver(); }
+      catch (e) { btn.disabled = false; btn.textContent = next.label; el.insertAdjacentHTML('beforeend', `<span class="text-err"> ${e.message}</span>`); }
+    };
+  } else if (p.status === 'out_for_delivery') {
+    el.innerHTML = `<span class="badge badge-accent">Waiting for delivery code</span>`;
+  } else if (p.status === 'failed') {
+    el.innerHTML = `<button class="btn btn-secondary btn-sm" data-pid="${p.id}" data-action="return">Returned to sender</button>`;
+    el.querySelector('button').onclick = async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try { await api('POST', `/api/driver/scan/${p.id}`, { action: 'return' }, _H); await loadDriver(); }
+      catch (err) { btn.disabled = false; }
+    };
+  }
+}
+
+// ── Delivery code scan ───────────────────────────────────────────────────────
+$('#scan-btn').onclick = async () => {
+  const code = ($('#scan-input').value || '').trim();
+  if (!code) { $('#scan-msg').textContent = 'Enter the code first.'; $('#scan-msg').className = 'text-err'; return; }
+  const me = await api('GET', '/api/driver/me', null, _H).catch(() => null);
+  const parcel = me?.parcels?.find(p => p.status === 'out_for_delivery');
+  if (!parcel) { $('#scan-msg').textContent = 'No parcels awaiting delivery code.'; return; }
+  try {
+    await api('POST', `/api/driver/scan/${parcel.id}`, { action: 'deliver', code }, _H);
+    $('#scan-input').value = '';
+    $('#scan-msg').textContent = 'Delivered.';
+    $('#scan-msg').className = 'text-ok';
+    await loadDriver();
+  } catch (e) {
+    $('#scan-msg').textContent = e.message + '. Ask the recipient to check their confirmation message.';
+    $('#scan-msg').className = 'text-err';
+  }
+};
+$('#scan-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('#scan-btn').click(); });
+</script>
+</body>
+</html>

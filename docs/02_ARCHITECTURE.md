@@ -23,7 +23,7 @@
 | Today | Replace with | Phase |
 |---|---|---|
 | Mock payment endpoint | Paystack or PayFast + signed webhook | 1 |
-| `x-driver-id` header login | Phone OTP + signed sessions | 1 |
+| ~~`x-driver-id` header login~~ | Phone OTP + sessions (done 2026-10-27, `src/auth.js`); codes still need SMS sending | 1 |
 | Shared admin key | Real admin accounts | 1 |
 | Links returned in API | SMS/WhatsApp sending | 1 |
 | Schematic SVG map | MapLibre + PMTiles | 2 |

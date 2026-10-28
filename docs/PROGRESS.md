@@ -2,42 +2,44 @@
 
 Platform name: **SenDexk** (chosen 2026-10-26; availability not yet checked).
 
-## Current state (2026-10-26)
-- Working starter app: pricing (petrol/electric), batching with profit check, state machine, ledger, hotspots, ETA, API, 4 simple pages, seeded day simulator. 35 tests pass.
-- Interactive demo published as an artifact (see docs/01_PROJECT_BRIEF.md).
-- Repository documentation written. **Repo not yet created on GitHub by the user.**
+## Current state (2026-10-28)
+- Working starter app: pricing (petrol/electric), batching with profit check, state machine, ledger, hotspots, ETA, API, 4 simple pages, seeded day simulator.
+- **Driver phone login (OTP) built** on branch `feat/driver-otp-login` (not yet pushed or merged). 52 tests pass.
+- Automations merged into main (PR #1): hooks (no commits on/to main, no secret files, `npm test` at end of turn), `/ship`, `/ask-decision`, `rules-checker` subagent.
+- Repo on GitHub (`incaex26-crypto/sendexk`), dev environment is a Codespace with Claude Code. Graphify installed (graph in `graphify-out/`, ignored by git).
 - Everything money-related is a mock. Prices are illustrative.
 
-## Money and pricing design settled (2026-10-26 afternoon)
-See Settled in `03_DECISIONS.md` and Phase 1b in `04_ROADMAP.md`. Not yet built. Tests still 35 passing because no code changed.
+## Done this session (2026-10-27)
+- Automations (PR #1, merged).
+- Driver login: `src/auth.js` (codes, sessions), `src/phone.js` (normalise numbers from region `phone` config), tables `otps` and `sessions`, routes `POST /api/auth/otp|verify|logout`, driver routes take `Authorization: Bearer <token>`, the `x-driver-id` header is gone, `POST /api/drivers` is admin-only, driver page has phone + code login and Log out.
+- Defaults chosen (user may change): code 6 digits, lasts 5 min, 5 wrong tries, max 3 codes per phone per 15 min; session 30 days.
+- No SMS provider yet: the code is shown on screen only when `OTP_DEV_CODES=1` (set by `npm run dev` and the API tests) and never when `NODE_ENV=production`. `npm start` refuses with 503.
+- rules-checker review done; its 2 problems fixed (codes now opt-in instead of shown by default; tests added for the production refusal and the other-region 403).
 
-## Done this session
-- Wrote CLAUDE.md, AGENTS.md, slash commands, CI, docs 00-08.
-- Researched: Claude Code in the cloud setup, plugin install commands, PMTiles extract and serve commands.
-
-## Automations added (2026-10-27, branch `chore/automations`, not merged)
-- Hooks (`.claude/settings.json` + `.claude/hooks/*.js`): no commits/pushes on or to main; no reading/editing secret files; `npm test` at end of each turn.
-- Commands `/ship` and `/ask-decision`; subagent `rules-checker`. `graphify-out/` added to `.gitignore`.
-- 39 tests pass (4 new in `test/hooks.test.js`). Waiting on the user to review and merge the pull request.
-- Environment done: project is in the Codespace and Claude Code runs there; Graphify installed (graph built locally in `graphify-out/`).
-
-## Environment status (2026-10-27)
-User created GitHub repo `sendexk` (account incaex26-crypto) and opened a Codespace (Node v24.21.0, Git present). Work laptop blocks installs, so the Codespace is the dev environment. Next: upload this project into the Codespace, run `npm test`, then install Claude Code extension and sign in, then plugins one at a time in this order: Claude Code Setup, Graphify (`uv tool install graphifyy`, `graphify install`), Agent Skills (`/plugin marketplace add anthropics/skills`), Ponytail (on a branch; source unverified), OmniRoute last (set INITIAL_PASSWORD first, fallback use only, never global ANTHROPIC_BASE_URL). Plugins do not run in claude.ai/code cloud sessions.
-The user wants instructions given ONE small action at a time (beginner).
+## Done 2026-10-28
+- **Full UI redesign** on `feat/ui-v1` (PR #5 open): calm layout, generous whitespace, amber accent, dark mode, no gradients.
+- **Driver OTP login** merged from `feat/driver-otp-login` into `feat/ui-v1`. Phone number → 6-digit code → 30-day session token. No SMS yet — code shown on screen only in dev mode (`OTP_DEV_CODES=1`).
+- **Booking page** (`index.html`): 4-step wizard (addresses → parcel → delivery window → pay). One firm price shown (cap). MapLibre draggable pins, suburb select fallback.
+- **Tracking page** (`track.html`): new page. Status, driver first name, ETA window, delivery code, live map.
+- **Driver page** (`driver.html`): phone OTP login, map-first (50 vh), open runs show total pay + km before accepting, step-by-step stop screens, delivery-code entry.
+- **Admin/ops page** (`admin.html`): live map (driver markers), stats, order list with status filters, plain action labels (Assign runs / Expire unconfirmed / Process earnings).
+- **Playwright screenshots** at 390 px and 1280 px for all 5 pages — zero console errors. Screenshots in `docs/screens/`.
+- Tests: **60 pass, 0 fail** (was 47 before OTP + UI work; added 13 OTP auth tests).
+- `scripts/screenshots.js` added; `npm run screenshots` to regenerate.
 
 ## Next step (one action)
-User follows `docs/00_START_HERE.md` steps 1-5, then starts a cloud session with `/pickup`.
-After that: Phase 1 first task = "driver phone login (OTP) with tests". Safe to start only after the user confirms the open decisions 1-3 in `03_DECISIONS.md` are not blocking (they do not block Phase 1).
+Review and merge PR #5 (`feat/ui-v1`) on GitHub, then decide on an SMS provider so OTP codes are actually sent (add to `docs/03_DECISIONS.md` Open as decision 15).
 
 ## Blocked / waiting on the user
-- Create GitHub account and repo; connect Claude (guide steps 1-4).
-- Decide: service area suburbs; individuals' pricing method; platform name.
-
-## Files touched
-All of `docs/`, `CLAUDE.md`, `AGENTS.md`, `.claude/commands/`, `.github/workflows/test.yml`, `.gitignore`.
+- Merge PR #5.
+- Choose an SMS/WhatsApp provider (Twilio, Africa's Talking, etc.) — needed for real OTP delivery.
+- Decide: pilot suburbs and first 5 businesses (Open item 3); payment provider (Open item 6).
 
 ## Notes for the next agent
 - Node 22.5+; run with `--disable-warning=ExperimentalWarning` (npm scripts do).
-- Map commands in docs/05 are unrun. Run and correct them in Phase 2.
+- To try the full app: `npm run seed`, `npm run dev` (http://localhost:3000). Driver login phone: `0710000000`.
+- Customer nav shows only "Book a delivery" and "Track"; driver/admin pages at `/driver.html` and `/admin.html`.
+- `get-map.js` falls back to up to 3 days old if today's Protomaps build is not ready.
+- Follow-ups not done: per-IP OTP rate limit; driver session revocation; cleanup of old OTP rows.
+- Admin key is still the shared `ADMIN_KEY = 'dev-admin'` (Phase 1). Never commit secrets.
 - The user is a beginner. Explain each step. Never push to main.
-- Phase 1b depends on the open item that stores keep a margin or not (decision 11); build it so the commission is a config value that can be zero.

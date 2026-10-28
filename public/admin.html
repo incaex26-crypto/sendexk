@@ -1,17 +1,152 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin</title><link rel="stylesheet" href="app.css"></head><body>
-<h1>Admin board</h1><nav><a href="/">Book</a><a href="/driver.html">Driver</a><a href="/admin.html">Admin</a></nav>
-<div class="card row"><button id="sweep" class="alt">Roll unconfirmed</button><button id="hot" class="alt">Refresh hotspots</button><button id="disp">Dispatch</button><button id="pay" class="alt">Run payouts</button></div>
-<div id="stats"></div><div id="mapbox"></div><div id="ev"></div>
-<script src="app.js"></script><script>
-const H={'x-admin-key':new URLSearchParams(location.search).get('key')||'dev-admin'};let region,map;
-const act=(id,p)=>$(id).onclick=async()=>{try{await api('POST',p,{},H);load()}catch(e){alert(e.message)}};
-act('#sweep','/api/admin/sweep');act('#hot','/api/admin/hotspots');act('#disp','/api/admin/dispatch');act('#pay','/api/admin/payouts');
-async function load(){region=region||await api('GET','/api/region');const o=await api('GET','/api/admin/overview',null,H);
-$('#stats').innerHTML=`<div class=card><b>Orders</b> ${Object.entries(o.orders).map(([k,v])=>`<span class=pill>${k}: ${v}</span>`).join(' ')||'none'}<br><b>Runs</b> ${Object.entries(o.runs).map(([k,v])=>`<span class=pill>${k}: ${v}</span>`).join(' ')||'none'}
-<div class=row style="margin-top:.6rem"><div><div class=mute>Platform revenue</div><div class=big>${R(o.money.revenue)}</div></div><div><div class=mute>Held in escrow</div><div class=big>${R(o.money.escrow)}</div></div><div><div class=mute>Owed to drivers</div><div class=big>${R(o.money.driverPayable)}</div></div></div>
-<div class=${o.money.ledgerBalanced?'ok':'err'}>Ledger ${o.money.ledgerBalanced?'balanced':'NOT BALANCED'}</div></div>`;
-const pins=[...o.hotspots.map(h=>({lat:h.lat,lng:h.lng,r:6+h.score*2,color:'#e8590c',label:'🔥'+h.score})),...o.drivers.filter(d=>d.lat).map(d=>({lat:d.lat,lng:d.lng,r:6,color:'#0f6b5c',label:d.name}))];
-map=mapView($('#mapbox'),region,{pins});
-$('#ev').innerHTML='<h2>Latest events</h2><div class=card><table>'+o.events.map(e=>`<tr><td>${new Date(e.at).toISOString().slice(11,16)}</td><td>${e.entity} #${e.entity_id}</td><td>${e.type}</td><td class=mute>${e.actor}</td></tr>`).join('')+'</table></div>'}
-load();setInterval(load,10000);
-</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Operations — SenDexk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+      integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
+<link rel="stylesheet" href="app.css">
+<style>
+  .filter-btn { background: var(--faint); border: 1px solid var(--line); border-radius: 99px; padding: .22rem .65rem; font: inherit; font-size: .78rem; color: var(--mute); cursor: pointer; }
+  .filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .status-chip { display: inline-block; padding: .08rem .45rem; border-radius: 99px; font-size: .72rem; font-weight: 600; }
+  .chip-pending,.chip-awaiting_payment,.chip-awaiting_confirmation { background: var(--faint); color: var(--mute); }
+  .chip-confirmed  { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+  .chip-batched,.chip-collected { background: color-mix(in srgb, var(--brand) 18%, transparent); color: var(--brand); }
+  .chip-out_for_delivery { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+  .chip-delivered  { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+  .chip-failed,.chip-cancelled { background: color-mix(in srgb, var(--err) 14%, transparent); color: var(--err); }
+</style>
+</head>
+<body>
+<div style="display:flex;flex-direction:column">
+<div class="map-wrap" style="border-radius:0;margin:0">
+  <div id="map" style="height:42vh;min-height:180px"></div>
+</div>
+<div class="page" style="padding-top:20px">
+<header class="page-head" style="margin-bottom:18px">
+  <h1>Operations</h1>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <button class="btn btn-ghost btn-sm" id="refresh-btn">Refresh</button>
+    <button class="theme-btn" id="theme-btn" onclick="toggleTheme()">Dark mode</button>
+  </div>
+</header>
+<div class="stat-row">
+  <div class="stat"><div class="stat-label">Pending</div><div class="stat-value" id="s-pending">—</div></div>
+  <div class="stat"><div class="stat-label">Confirmed</div><div class="stat-value" id="s-confirmed">—</div></div>
+  <div class="stat"><div class="stat-label">In progress</div><div class="stat-value" id="s-running">—</div></div>
+  <div class="stat"><div class="stat-label">Delivered today</div><div class="stat-value" id="s-delivered">—</div></div>
+  <div class="stat"><div class="stat-label">Ledger balance</div><div class="stat-value" id="s-balance">—</div></div>
+</div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+  <button class="btn btn-secondary btn-sm" id="btn-assign">Assign runs</button>
+  <button class="btn btn-secondary btn-sm" id="btn-sweep">Expire unconfirmed</button>
+  <button class="btn btn-secondary btn-sm" id="btn-payouts">Process earnings</button>
+</div>
+<p id="action-msg" class="text-mute" style="min-height:1.2em;margin-bottom:16px"></p>
+<h2 style="margin-top:0">Orders</h2>
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px" id="filter-row"></div>
+<div style="overflow-x:auto">
+  <table class="data">
+    <thead><tr><th>#</th><th>Status</th><th>Pickup</th><th>Drop-off</th><th>Vehicle</th><th>Price</th><th>Date</th><th></th></tr></thead>
+    <tbody id="orders-body"><tr><td colspan="8" class="text-mute">Loading…</td></tr></tbody>
+  </table>
+</div>
+<h2 style="margin-top:28px">Recent events</h2>
+<div style="overflow-x:auto">
+  <table class="data">
+    <thead><tr><th>Time</th><th>Type</th><th>Order</th><th>Note</th></tr></thead>
+    <tbody id="events-body"><tr><td colspan="4" class="text-mute">Loading…</td></tr></tbody>
+  </table>
+</div>
+</div>
+</div>
+<script src="app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"
+        integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"
+        integrity="sha384-QfbOCebHNw8pQiPAOd2IFee2v2A5VYZxBk0+JGZ5H+3mfzVIp6zsQNkTsfGJot93" crossorigin="anonymous"></script>
+<script>
+const ADMIN = { 'x-admin-key': 'dev-admin' };
+let _map = null, _region = null, _allOrders = [], _filter = 'all';
+const STATUS_LABELS = {
+  awaiting_payment:'Awaiting payment',awaiting_confirmation:'Awaiting confirmation',
+  confirmed:'Confirmed',batched:'Assigned',collected:'Collected',
+  out_for_delivery:'Out for delivery',delivered:'Delivered',failed:'Failed',cancelled:'Cancelled',
+};
+(async () => {
+  _region = await api('GET', '/api/region').catch(() => null);
+  _map = tileMap($('#map'), _region, { height: '42vh', zoom: 11 });
+  await load();
+  $('#refresh-btn').onclick = load;
+})();
+async function load() {
+  let ov;
+  try { ov = await api('GET', '/api/admin/overview', null, ADMIN); }
+  catch (e) { if (e.status === 401) { document.body.innerHTML = '<div class="page"><p class="text-err">Admin access required.</p></div>'; return; } return; }
+  const o = ov.orders || {};
+  $('#s-pending').textContent = (o.awaiting_payment||0) + (o.awaiting_confirmation||0);
+  $('#s-confirmed').textContent = o.confirmed || 0;
+  $('#s-running').textContent = (o.batched||0) + (o.collected||0) + (o.out_for_delivery||0);
+  $('#s-delivered').textContent = o.delivered || 0;
+  $('#s-balance').textContent = ov.money ? R(ov.money.ledgerBalance ?? 0) : '—';
+  if (_map && ov.drivers) {
+    _map.setMarkers((ov.drivers||[]).filter(d=>d.lat).map(d => ({
+      lat:d.lat,lng:d.lng,type:'driver',label:'V',popup:`<b>${d.name}</b><br>${d.vehicle}`
+    })));
+  }
+  const events = ov.events || [];
+  const orderIds = [...new Set(events.filter(e=>e.entity==='order').map(e=>e.entity_id))];
+  const orderDetails = await Promise.all(
+    orderIds.slice(0,50).map(id => api('GET',`/api/admin/orders/${id}`,null,ADMIN).catch(()=>null))
+  );
+  _allOrders = orderDetails.filter(Boolean).map(x=>x.order);
+  renderFilters(); renderOrders(); renderEvents(events.slice(0,50));
+}
+function renderFilters() {
+  const statuses = ['all', ...new Set(_allOrders.map(o=>o.status))];
+  $('#filter-row').innerHTML = statuses.map(s =>
+    `<button class="filter-btn${_filter===s?' active':''}" onclick="setFilter('${s}')">${s==='all'?'All':(STATUS_LABELS[s]||s)} (${s==='all'?_allOrders.length:_allOrders.filter(o=>o.status===s).length})</button>`
+  ).join('');
+}
+function setFilter(s) { _filter=s; renderFilters(); renderOrders(); }
+function renderOrders() {
+  const rows = _filter==='all' ? _allOrders : _allOrders.filter(o=>o.status===_filter);
+  if (!rows.length) { $('#orders-body').innerHTML='<tr><td colspan="8" class="text-mute">No orders match this filter.</td></tr>'; return; }
+  $('#orders-body').innerHTML = rows.map(o => `<tr>
+    <td>${o.id}</td>
+    <td><span class="status-chip chip-${o.status}">${STATUS_LABELS[o.status]||o.status}</span></td>
+    <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.pickup_addr||'—'}</td>
+    <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.drop_addr||'—'}</td>
+    <td>${o.vehicle_class||'—'}</td>
+    <td class="amount">${o.cap_cents!=null?R(o.cap_cents):'—'}</td>
+    <td style="white-space:nowrap">${fmtDate(o.service_date)}</td>
+    <td><a href="/track.html?id=${o.id}" class="text-mute text-sm">Track</a></td>
+  </tr>`).join('');
+}
+function renderEvents(events) {
+  if (!events.length) { $('#events-body').innerHTML='<tr><td colspan="4" class="text-mute">No events yet.</td></tr>'; return; }
+  $('#events-body').innerHTML = events.map(e => {
+    const ms = typeof e.created_at==='number' ? (e.created_at>1e12?e.created_at:e.created_at*1000) : Date.parse(e.created_at);
+    const t = ms ? fmtTime(new Date(ms).toISOString()) : '—';
+    return `<tr><td style="white-space:nowrap">${t}</td><td>${e.kind||e.type||'—'}</td><td>${e.entity_id??'—'}</td><td class="text-mute" style="font-size:.8rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.note||''}</td></tr>`;
+  }).join('');
+}
+async function adminAction(path, label) {
+  $('#action-msg').textContent = label + '…';
+  try {
+    const r = await api('POST', path, {}, ADMIN);
+    $('#action-msg').textContent = r.runs ? `${r.runs.length} run${r.runs.length!==1?'s':''} assigned.` : label + ' complete.';
+    await load();
+  } catch (e) { $('#action-msg').textContent = e.message + '. Check the admin key.'; }
+}
+$('#btn-assign').onclick  = () => adminAction('/api/admin/dispatch','Assigning runs');
+$('#btn-sweep').onclick   = () => adminAction('/api/admin/sweep','Expiring unconfirmed orders');
+$('#btn-payouts').onclick = () => adminAction('/api/admin/payouts','Processing earnings');
+</script>
+</body>
+</html>
