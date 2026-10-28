@@ -11,6 +11,7 @@
     "seed": "node --disable-warning=ExperimentalWarning scripts/seed.js",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\"",
     "simulate": "node --disable-warning=ExperimentalWarning scripts/simulate.js",
-    "new-region": "node scripts/new-region.js"
+    "new-region": "node scripts/new-region.js",
+    "get-map": "node scripts/get-map.js"
   }
 }

@@ -7,6 +7,7 @@ const S = require('./src/service');
 
 const ADMIN_KEY = process.env.ADMIN_KEY || 'dev-admin';
 const PUBLIC = path.join(__dirname, 'public');
+const MAPS_DIR = path.join(__dirname, 'data', 'maps');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' };
 
 function createApp({ db, regions }) {
@@ -17,7 +18,7 @@ function createApp({ db, regions }) {
 
   // ---- public ----
   add('GET', '/api/health', () => ({ ok: true }));
-  add('GET', '/api/region', ({ region }) => ({ id: region.id, name: region.name, brand: region.brand, center: region.center, zones: region.zones, vehicles: Object.fromEntries(Object.entries(region.vehicles).map(([k, v]) => [k, { label: v.label, energy: v.energy }])), cutoffs: region.cutoffs, currency: region.currency, status: region.status }));
+  add('GET', '/api/region', ({ region }) => ({ id: region.id, name: region.name, brand: region.brand, center: region.center, zones: region.zones, vehicles: Object.fromEntries(Object.entries(region.vehicles).map(([k, v]) => [k, { label: v.label, energy: v.energy }])), cutoffs: region.cutoffs, currency: region.currency, status: region.status, map: region.map || null }));
   add('POST', '/api/quote', ({ region, body }) => S.quote(region, body));
   add('POST', '/api/orders', ({ region, body, req }) => { const r = S.createOrder(db, region, body, req.headers['idempotency-key']); return { status: r.replay ? 200 : 201, body: { order: pub(r.order), quote: r.quote } }; });
   add('GET', '/api/orders/:id/track', ({ region, params }) => S.track(db, region, +params.id));
@@ -55,14 +56,14 @@ function createApp({ db, regions }) {
   async function handle(req, res) {
     const url = new URL(req.url, 'http://x');
     try {
-      if (!url.pathname.startsWith('/api/')) return serveStatic(url.pathname, res);
+      if (!url.pathname.startsWith('/api/')) return serveStatic(url.pathname, req, res);
       for (const r of routes) {
         if (r.method !== req.method) continue;
         const m = r.re.exec(url.pathname); if (!m) continue;
         if (r.opts.admin && req.headers['x-admin-key'] !== ADMIN_KEY) return send(res, 401, { error: 'admin key required' });
         let driver = null;
         if (r.opts.driver) { driver = Number(req.headers['x-driver-id']); if (!driver) return send(res, 401, { error: 'x-driver-id required' }); }
-        const body = req.method === 'POST' ? await readJson(req) : {};
+        const body = (req.method === 'POST' || req.method === 'PUT') ? await readJson(req) : {};
         const out = await r.handler({ req, url, region: regionOf(url), params: m.groups || {}, body, driver });
         if (out && out.status && out.body) return send(res, out.status, out.body);
         return send(res, 200, out);
@@ -84,10 +85,35 @@ function readJson(req) {
     req.on('end', () => { if (!chunks.length) return resolve({}); try { resolve(JSON.parse(Buffer.concat(chunks))); } catch { reject(Object.assign(new Error('invalid JSON'), { status: 400 })); } });
   });
 }
-function serveStatic(p, res) {
+function serveStatic(p, req, res) {
+  // PMTiles need HTTP range requests so the browser can seek inside the file.
+  if (p.startsWith('/maps/')) {
+    const file = path.normalize(path.join(MAPS_DIR, p.slice('/maps/'.length)));
+    if (!file.startsWith(MAPS_DIR)) { res.writeHead(403); return res.end('forbidden'); }
+    if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); return res.end('not found'); }
+    return serveRange(file, req, res);
+  }
   const rel = p === '/' ? '/index.html' : p, file = path.normalize(path.join(PUBLIC, rel));
   if (!file.startsWith(PUBLIC) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); return res.end('not found'); }
   res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' }); fs.createReadStream(file).pipe(res);
+}
+
+function serveRange(file, req, res) {
+  const total = fs.statSync(file).size;
+  const corsH = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Range', 'Accept-Ranges': 'bytes', 'Cache-Control': 'public, max-age=86400' };
+  if (req.method === 'OPTIONS') { res.writeHead(204, { ...corsH, 'Access-Control-Allow-Methods': 'GET, HEAD' }); return res.end(); }
+  const rangeHdr = req.headers['range'];
+  if (rangeHdr) {
+    const m = /bytes=(\d+)-(\d*)/.exec(rangeHdr);
+    if (!m) { res.writeHead(416, { 'Content-Range': `bytes */${total}` }); return res.end(); }
+    const start = parseInt(m[1], 10), end = m[2] ? parseInt(m[2], 10) : total - 1;
+    if (start > end || end >= total) { res.writeHead(416, { 'Content-Range': `bytes */${total}` }); return res.end(); }
+    res.writeHead(206, { ...corsH, 'Content-Type': 'application/octet-stream', 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${total}` });
+    fs.createReadStream(file, { start, end }).pipe(res);
+  } else {
+    res.writeHead(200, { ...corsH, 'Content-Type': 'application/octet-stream', 'Content-Length': total });
+    fs.createReadStream(file).pipe(res);
+  }
 }
 
 if (require.main === module) {
