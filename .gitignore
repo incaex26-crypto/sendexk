@@ -11,3 +11,6 @@ data/maps/*
 
 # Knowledge graph output (rebuild with /graphify)
 graphify-out/
+
+# Autopilot session logs
+.autopilot-*.log

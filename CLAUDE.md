@@ -25,6 +25,7 @@ Businesses and individuals book same-day pickup and delivery. The recipient must
 - Region differences live in `config/regions/*.json`, not in code. No city names or currency symbols in `src/`.
 - Prices in `za-jhb.json` are illustrative until the user replaces them with measured values.
 - Do not add dependencies unless needed. Ask first, and say why in plain words.
+- One task per fresh session. Default model Sonnet. Read only files named in the task. No subagents unless the owner asks. Never change `scripts/gate.js`, `scripts/autopilot.sh` or `.claude/` in a normal task.
 
 ## How to work
 - Small steps: one task, one branch (`feat/<name>`), tests first or alongside, then a pull request.
