@@ -4,7 +4,8 @@ Rules for the agent: do ONLY the task given. Read only the files named under "Fi
 
 ## T1 · Security hardening
 risk: high
-status: todo
+status: done
+result: admin accounts, sessions, OTP limits, suspend logout, cleanup job; 64 tests pass
 Files: src/auth*.js or wherever login lives, src/service.js, server.js, public/admin.html, scripts/ (new), test/
 Steps:
 1. Admin accounts: table admin_users (id, email unique, password_hash, created_at). Hash with crypto.scrypt, random 16-byte salt, constant-time compare. Script scripts/create-admin.js <email> asks for the password from an environment variable ADMIN_PASSWORD (never a command-line argument). Replace the shared admin key everywhere. Sessions: random 32-byte token, stored hashed, expire after 8 hours, sent as HttpOnly SameSite=Strict cookie. Login screen on public/admin.html.

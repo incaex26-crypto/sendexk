@@ -44,6 +44,7 @@ function open(file = ':memory:') {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec(SCHEMA);
+  require('./auth').initAuth(db);
   return db;
 }
 
