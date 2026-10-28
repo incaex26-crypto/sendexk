@@ -48,6 +48,10 @@ const token = new URLSearchParams(location.search).get('t');
 let pin = null, _map = null;
 
 (async () => {
+  if (!token) {
+    $('#info').innerHTML = '<span class="text-mute">No confirmation link found. Check the SMS sent to the recipient and open the full link.</span>';
+    return;
+  }
   try {
     const [o, region] = await Promise.all([
       api('GET', '/api/confirm/' + token),

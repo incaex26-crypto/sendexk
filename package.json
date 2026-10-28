@@ -4,7 +4,9 @@
   "description": "Same-day batched delivery platform: runnable starter (API, SQLite, pricing, batching, simulator).",
   "private": true,
   "type": "commonjs",
-  "engines": { "node": ">=22.5" },
+  "engines": {
+    "node": ">=22.5"
+  },
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server.js",
     "dev": "DEV=1 OTP_DEV_CODES=1 node --disable-warning=ExperimentalWarning --watch server.js",
@@ -12,6 +14,10 @@
     "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\"",
     "simulate": "node --disable-warning=ExperimentalWarning scripts/simulate.js",
     "new-region": "node scripts/new-region.js",
-    "get-map": "node scripts/get-map.js"
+    "get-map": "node scripts/get-map.js",
+    "screenshots": "node scripts/screenshots.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.2"
   }
 }
