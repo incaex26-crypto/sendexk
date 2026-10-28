@@ -43,6 +43,20 @@ test('API end to end: quote, book, pay, confirm, dispatch, accept, deliver', asy
     assert.equal((await call('GET', '/api/confirm/not-a-token')).status, 404);
   } finally { srv.close(); }
 });
+test('POST /api/quote returns valid price range for each vehicle class', async () => {
+  const { srv, call } = await boot();
+  try {
+    for (const cls of ['bike', 'car', 'van']) {
+      const r = await call('POST', '/api/quote', { pickup: pts.sandton, drop: pts.rosebank, vehicleClass: cls });
+      assert.equal(r.status, 200, `quote/${cls} status`);
+      assert.ok(typeof r.body.low === 'number' && r.body.low >= 0, `quote/${cls} low is non-negative integer`);
+      assert.ok(typeof r.body.cap === 'number' && r.body.cap >= r.body.low, `quote/${cls} cap >= low`);
+      assert.ok(Number.isInteger(r.body.low) && Number.isInteger(r.body.cap), `quote/${cls} prices are whole cents`);
+      assert.ok(typeof r.body.serviceDate === 'string' && r.body.serviceDate.length > 0, `quote/${cls} serviceDate present`);
+    }
+  } finally { srv.close(); }
+});
+
 test('static pages are served and path traversal is blocked', async () => {
   const { srv } = await boot(); const base = `http://127.0.0.1:${srv.address().port}`;
   try { assert.equal((await fetch(base + '/../package.json')).status, 404); assert.equal((await fetch(base + '/%2e%2e/package.json')).status, 404); } finally { srv.close(); }

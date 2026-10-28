@@ -1,122 +1,167 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Driver</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Driver — SenDexk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+      integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
 <link rel="stylesheet" href="app.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-</head><body>
-<h1>Driver</h1><nav><a href="/">Book</a><a href="/driver.html">Driver</a><a href="/admin.html">Admin</a></nav>
-<div class="card"><label>Driver id (starter login; use phone OTP in production)</label><div class="row"><input id="did" type="number" value="1"><button id="go">Open</button></div></div>
-<div id="run-map" style="width:100%;height:320px;display:none;border-radius:8px;overflow:hidden;margin:1rem 0;position:relative"></div>
-<div id="me"></div><div id="runs"></div>
+<style>
+  .driver-layout { display: flex; flex-direction: column; gap: 0; }
+  .run-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .run-pay { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); line-height: 1; }
+  .stop-list { list-style: none; padding: 0; margin: 0; }
+  .stop-item { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); align-items: flex-start; }
+  .stop-item:last-child { border-bottom: none; }
+  .stop-num { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; font-size: .78rem; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+  .stop-addr { font-size: .9rem; line-height: 1.4; }
+  .stop-addr .stop-type { font-size: .72rem; color: var(--mute); text-transform: capitalize; margin-bottom: 1px; }
+  .action-strip { display: flex; gap: 10px; margin-top: 14px; }
+  .scan-section { margin-top: 18px; }
+  #scan-out { margin-top: 8px; min-height: 1.4em; }
+  #no-runs { color: var(--mute); text-align: center; padding: 40px 0; font-size: .95rem; }
+</style>
+</head>
+<body>
+<div class="driver-layout">
+
+<!-- Map takes top half -->
+<div class="map-wrap" style="border-radius:0;margin:0">
+  <div id="map" style="height:50vh;min-height:220px"></div>
+</div>
+
+<!-- Panel below map -->
+<div class="page" style="padding-top:18px">
+
+<header class="page-head" style="margin-bottom:14px">
+  <h1>Driver</h1>
+  <div style="display:flex;gap:10px;align-items:center">
+    <nav><a href="/">Book</a><a href="/admin.html">Ops</a></nav>
+    <button class="theme-btn" id="theme-btn" onclick="toggleTheme()">☾ Dark</button>
+  </div>
+</header>
+
+<div id="run-panel">
+  <div id="no-runs">No runs assigned to you right now. Check back soon.</div>
+</div>
+
+<div id="scan-section" class="scan-section" style="display:none">
+  <h2>Scan delivery code</h2>
+  <p class="text-mute" style="margin:0 0 8px">Type the code the recipient gives you at drop-off.</p>
+  <div style="display:flex;gap:8px">
+    <input id="scan-input" placeholder="e.g. A3F9" style="width:auto;flex:1;font-size:1.1rem;letter-spacing:.1em;text-transform:uppercase">
+    <button class="btn btn-primary btn-sm" id="scan-btn" style="width:auto">Confirm</button>
+  </div>
+  <p id="scan-out" class="text-mute"></p>
+</div>
+
+</div>
+</div>
 
 <script src="app.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"
+        integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"
+        integrity="sha384-QfbOCebHNw8pQiPAOd2IFee2v2A5VYZxBk0+JGZ5H+3mfzVIp6zsQNkTsfGJot93" crossorigin="anonymous"></script>
 <script>
-let H={}, _region=null, _map=null, _protocolAdded=false;
+let _map = null, currentRun = null;
 
-async function fetchRegion(){if(!_region)_region=await api('GET','/api/region');return _region;}
+(async () => {
+  const region = await api('GET', '/api/region').catch(() => null);
+  _map = tileMap($('#map'), region || {
+    center: { lat: -26.1, lng: 28.05 },
+    map: null,
+  }, { height: '50vh', zoom: 12 });
 
-$('#go').onclick=load;
+  await loadRuns(region);
+})();
 
-async function load(){
-  H={'x-driver-id':$('#did').value};
-  try{
-    const [m, region]=await Promise.all([api('GET','/api/driver/me',null,H), fetchRegion()]);
-    $('#me').innerHTML=`<div class="card"><b>${m.driver.name}</b> <span class=pill>${m.driver.vehicle}</span> <span class=pill>${m.driver.tier}</span>
-${m.driver.tier==='standard'?'<button id="pro" class="alt">Get Pro for 30 days (lower platform share)</button>':''}
-<button id="pin" class="alt">Send my location now</button></div>`;
-    $('#pro')&&($('#pro').onclick=async()=>{await api('POST','/api/driver/pro',{},H);load()});
-    $('#pin').onclick=()=>navigator.geolocation?.getCurrentPosition(p=>api('POST','/api/driver/ping',{lat:p.coords.latitude,lng:p.coords.longitude},H).then(()=>alert('Sent')));
-    if(m.run){
-      $('#runs').innerHTML=`<h2>Your run #${m.run.id} · ${R(m.run.payoutCents)}</h2>`+m.parcels.map(p=>`<div class="card"><b>#${p.id}</b> ${p.pickup_name} → ${p.drop_name} <span class=pill>${p.status}</span><div class=mute>${p.drop_addr||''}</div><div id="a${p.id}"></div></div>`).join('');
-      m.parcels.forEach(p=>actions(p));
-      showRunMap(m.parcels, region);
-    } else {
-      hideMap();
-      const rs=await api('GET','/api/driver/runs',null,H);
-      $('#runs').innerHTML='<h2>Open runs</h2>'+(rs.length?rs.map(r=>`<div class="card"><div class=big>${R(r.payoutCents)}</div>${r.parcels} parcels · ${r.km} km · ~${r.minutes} min${r.bonusCents?` <span class=pill>incl. ${R(r.bonusCents)} hotspot bonus</span>`:''}<button data-r="${r.id}">Accept</button></div>`).join(''):'<p class=mute>No runs right now.</p>');
-      document.querySelectorAll('[data-r]').forEach(b=>b.onclick=async()=>{try{await api('POST',`/api/driver/runs/${b.dataset.r}/accept`,{},H);load()}catch(e){alert(e.message);load()}});
-    }
-  }catch(e){$('#me').innerHTML=`<p class=err>${e.message}</p>`}
-}
+async function loadRuns(region) {
+  let runs;
+  try { runs = await api('GET', '/api/runs'); } catch { runs = []; }
 
-function hideMap(){
-  const el=document.getElementById('run-map');
-  if(el)el.style.display='none';
-  if(_map){_map.remove();_map=null;}
-}
+  const active = runs.filter(r => ['assigned', 'in_progress'].includes(r.status));
+  if (!active.length) { $('#run-panel').innerHTML = '<div id="no-runs">No runs assigned to you right now. Check back soon.</div>'; return; }
 
-function showRunMap(parcels, region){
-  const el=document.getElementById('run-map');
-  if(!el||!parcels.length||!window.maplibregl||!window.pmtiles){return hideMap();}
-  el.style.display='block';
+  currentRun = active[0];
+  const stops = currentRun.stops || [];
+  const pay = currentRun.driverPay ?? currentRun.price ?? 0;
 
-  // Register protocol once
-  if(!_protocolAdded){
-    const protocol=new pmtiles.Protocol();
-    maplibregl.addProtocol('pmtiles',protocol.tile.bind(protocol));
-    _protocolAdded=true;
-  }
+  const markers = stops.map((s, i) => ({
+    lat: s.lat, lng: s.lng,
+    type: s.type === 'pickup' ? 'pickup' : 'drop',
+    label: String(i + 1),
+    popup: `<b>${i + 1}. ${s.type === 'pickup' ? 'Pickup' : 'Drop-off'}</b><br>${s.address || ''}`,
+  }));
 
-  const tilesPath=(region.map&&region.map.tilesUrl)||'/maps/jhb.pmtiles';
-  const tileUrl='pmtiles://'+window.location.origin+tilesPath;
+  if (_map && markers.length) _map.setMarkers(markers);
 
-  const style={
-    version:8,
-    sources:{protomaps:{type:'vector',url:tileUrl,attribution:'© <a href="https://openstreetmap.org">OpenStreetMap</a> contributors'}},
-    layers:[
-      {id:'bg',type:'background',paint:{'background-color':'#f0ece6'}},
-      {id:'earth',type:'fill',source:'protomaps','source-layer':'earth',paint:{'fill-color':'#f0ece6'}},
-      {id:'water',type:'fill',source:'protomaps','source-layer':'water',paint:{'fill-color':'#a8d4e6'}},
-      {id:'landuse',type:'fill',source:'protomaps','source-layer':'landuse',paint:{'fill-color':'#dff0d0','fill-opacity':0.6}},
-      {id:'buildings',type:'fill',source:'protomaps','source-layer':'buildings',minzoom:13,paint:{'fill-color':'#d8d4cc','fill-outline-color':'#b8b3ab'}},
-      {id:'roads_minor',type:'line',source:'protomaps','source-layer':'roads',paint:{'line-color':'#ffffff','line-width':['interpolate',['linear'],['zoom'],11,1,16,4]}},
-      {id:'roads_major',type:'line',source:'protomaps','source-layer':'roads',filter:['in',['get','pmap:kind'],['literal',['primary','secondary','trunk','highway']]],paint:{'line-color':'#f0d878','line-width':['interpolate',['linear'],['zoom'],10,2,16,8]}},
-    ]
+  const stopItems = stops.map((s, i) => `
+    <li class="stop-item">
+      <span class="stop-num">${i + 1}</span>
+      <div class="stop-addr">
+        <div class="stop-type">${s.type === 'pickup' ? 'Pick up' : 'Drop off'}</div>
+        ${s.address || 'Address not set'}
+      </div>
+    </li>`).join('');
+
+  $('#run-panel').innerHTML = `
+    <div class="run-header">
+      <div>
+        <div class="text-mute" style="font-size:.78rem;margin-bottom:2px">Run #${currentRun.id}</div>
+        <h2 style="margin:0">${stops.length} stop${stops.length !== 1 ? 's' : ''}</h2>
+      </div>
+      <div class="run-pay">${R(pay)}</div>
+    </div>
+    <ul class="stop-list">${stopItems || '<li class="stop-item"><span class="text-mute">No stops yet.</span></li>'}</ul>
+    ${currentRun.status === 'assigned' ? `
+    <div class="action-strip">
+      <button class="btn btn-primary" id="accept-btn">Accept run for ${R(pay)}</button>
+      <button class="btn btn-secondary" id="decline-btn">Decline</button>
+    </div>` : `
+    <div class="action-strip">
+      <span class="pill ok">In progress</span>
+    </div>`}`;
+
+  $('#scan-section').style.display = 'block';
+
+  const ab = $('#accept-btn');
+  if (ab) ab.onclick = async () => {
+    try {
+      await api('POST', `/api/runs/${currentRun.id}/accept`);
+      ab.textContent = 'Run accepted'; ab.disabled = true;
+      $('#decline-btn')?.remove();
+      document.querySelector('.action-strip').insertAdjacentHTML('beforeend', '<span class="pill ok" style="margin-left:4px">In progress</span>');
+    } catch (e) { ab.insertAdjacentHTML('afterend', `<p class="text-err" style="margin:6px 0 0">${e.message}</p>`); }
   };
 
-  if(_map){_map.remove();_map=null;}
-
-  const fallback=[region.center.lng,region.center.lat];
-  const fp=parcels.find(p=>p.pickup_lat&&p.pickup_lng);
-  _map=new maplibregl.Map({container:el,style,center:fp?[fp.pickup_lng,fp.pickup_lat]:fallback,zoom:12,attributionControl:true});
-
-  _map.on('error',()=>{
-    // Tiles not downloaded yet — show message without crashing
-    if(_map){_map.remove();_map=null;}
-    el.innerHTML='<div style="padding:2rem;text-align:center;color:#666;font-size:.9rem">Map tiles not available.<br>Run: <code>node scripts/get-map.js</code></div>';
-    el.style.display='block';
-  });
-
-  _map.on('load',()=>{
-    const bounds=new maplibregl.LngLatBounds();
-    let hasCoords=false;
-    parcels.forEach((p,i)=>{
-      const seq=String(i+1);
-      if(p.pickup_lat&&p.pickup_lng){
-        hasCoords=true; bounds.extend([p.pickup_lng,p.pickup_lat]);
-        const d=document.createElement('div');
-        d.title=`Pickup ${seq}: ${p.pickup_name}`;
-        d.style.cssText='width:26px;height:26px;border-radius:50%;background:#e8590c;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:bold;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.3)';
-        d.textContent=seq;
-        new maplibregl.Marker({element:d}).setLngLat([p.pickup_lng,p.pickup_lat]).setPopup(new maplibregl.Popup({offset:16}).setHTML(`<b>Pickup #${seq}</b><br>${p.pickup_name}`)).addTo(_map);
-      }
-      if(p.drop_lat&&p.drop_lng){
-        hasCoords=true; bounds.extend([p.drop_lng,p.drop_lat]);
-        const d=document.createElement('div');
-        d.title=`Drop ${seq}: ${p.drop_name}`;
-        d.style.cssText='width:26px;height:26px;border-radius:4px;background:#c01515;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:bold;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.3)';
-        d.textContent=seq;
-        new maplibregl.Marker({element:d}).setLngLat([p.drop_lng,p.drop_lat]).setPopup(new maplibregl.Popup({offset:16}).setHTML(`<b>Drop #${seq}</b><br>${p.drop_name}`)).addTo(_map);
-      }
-    });
-    if(hasCoords&&!bounds.isEmpty())_map.fitBounds(bounds,{padding:60,maxZoom:15});
-  });
+  const db = $('#decline-btn');
+  if (db) db.onclick = async () => {
+    if (!confirm('Decline this run?')) return;
+    try { await api('POST', `/api/runs/${currentRun.id}/decline`); await loadRuns(region); }
+    catch (e) { db.insertAdjacentHTML('afterend', `<p class="text-err" style="margin:6px 0 0">${e.message}</p>`); }
+  };
 }
 
-function actions(p){const el=$('#a'+p.id),nxt={batched:['collect','Collected'],collected:['out','Out for delivery'],out_for_delivery:null}[p.status];
-if(nxt)el.innerHTML=`<button data-x="${nxt[0]}">${nxt[1]}</button>`;
-else if(p.status==='out_for_delivery')el.innerHTML=`<input placeholder="Recipient's 4-digit code" id="c${p.id}" inputmode="numeric"><button data-x="deliver">Delivered</button><button class="alt" data-x="fail">Could not deliver</button>`;
-else if(p.status==='failed')el.innerHTML=`<button data-x="return">Returned to sender</button>`;
-el.querySelectorAll('[data-x]').forEach(b=>b.onclick=async()=>{const a=b.dataset.x,body={action:a};if(a==='deliver')body.code=$('#c'+p.id).value;if(a==='fail')body.reason='recipient unreachable';
-try{await api('POST','/api/driver/scan/'+p.id,body,H);load()}catch(e){alert(e.message)}})}
-</script></body></html>
+$('#scan-btn').onclick = async () => {
+  const code = ($('#scan-input').value || '').trim().toUpperCase();
+  if (!code) { $('#scan-out').textContent = 'Enter the code first.'; $('#scan-out').className = 'text-err'; return; }
+  try {
+    await api('POST', '/api/scan', { code, runId: currentRun?.id });
+    $('#scan-out').textContent = 'Delivery confirmed.';
+    $('#scan-out').className = 'text-ok';
+    $('#scan-input').value = '';
+  } catch (e) {
+    $('#scan-out').textContent = e.message + '. Try again or call ops.';
+    $('#scan-out').className = 'text-err';
+  }
+};
+
+$('#scan-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('#scan-btn').click(); });
+</script>
+</body>
+</html>

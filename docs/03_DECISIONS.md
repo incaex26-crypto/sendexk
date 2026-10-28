@@ -51,3 +51,4 @@
 11. How much, if anything, to pay stores per delivery when the shopper pays on our link (stores lose shipping margin).
 12. Default unpaid-link window before falling back to the store's carrier (30 min proposed).
 13. Merge distance values (30 m / 150 m) to be tuned with real drivers.
+14. Address search provider (geocoder): the booking page currently lets the user click the map or choose a suburb. When typed address search is needed, which provider? Options: Nominatim/OpenStreetMap (free, no key, slower), Photon (free, no key, OSM-based), Google Places (accurate for SA, costs per request), Pelias self-hosted (no cost per request, needs a server). No decision made — address search is not wired to any external API yet.

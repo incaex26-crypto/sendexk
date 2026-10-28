@@ -1,14 +1,109 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm delivery</title><link rel="stylesheet" href="app.css"></head><body>
-<h1>Confirm your delivery</h1><div id="info" class="card">Loading…</div><div id="mapbox"></div>
-<div class="card" id="act" hidden><button id="gps" class="alt">Use my current location</button><button id="yes">Confirm: I'll be here</button><button id="no" class="alt">I won't be available today</button><p id="msg"></p></div>
-<script src="app.js"></script><script>
-const token=new URLSearchParams(location.search).get('t');let pin=null,map;
-(async()=>{try{const o=await api('GET','/api/confirm/'+token);
-$('#info').innerHTML=`<b>${o.from}</b> is sending you a parcel on <b>${o.serviceDate}</b>.<br><span class=mute>Drag the pin to where you'll be to receive it.</span>`;
-pin={lat:o.lat,lng:o.lng};map=mapView($('#mapbox'),{zones:[{name:'Here',lat:o.lat,lng:o.lng}].concat(o.region.zones||[])});
-const reg=await api('GET','/api/region');map=mapView($('#mapbox'),reg,{pins:[{...pin,label:'Deliver here'}],onPin:(p)=>{pin=p;map.draw([{...p,label:'Deliver here'}])}});$('#act').hidden=false;
-if(o.confirmed)$('#msg').textContent='Already confirmed. You can move the pin and confirm again.'}catch(e){$('#info').innerHTML=`<span class=err>${e.message}</span>`}})();
-$('#gps').onclick=()=>navigator.geolocation?.getCurrentPosition(p=>{pin={lat:p.coords.latitude,lng:p.coords.longitude};map.draw([{...pin,label:'Deliver here'}])},()=>$('#msg').textContent='Could not read your location. Drag the pin instead.');
-$('#yes').onclick=async()=>{try{const r=await api('POST','/api/confirm/'+token,{available:true,...pin});$('#act').hidden=true;$('#info').innerHTML=`<p class=ok>Confirmed for ${r.serviceDate}.</p><p>Your delivery code:</p><div class=big>${r.deliveryCode}</div><p class=mute>Tell the driver this code when they hand over the parcel. Don't share it earlier.</p>`}catch(e){$('#msg').innerHTML=`<span class=err>${e.message}</span>`}};
-$('#no').onclick=async()=>{try{const r=await api('POST','/api/confirm/'+token,{available:false});$('#act').hidden=true;$('#info').innerHTML=`<p>No problem. We moved it to ${r.serviceDate} and will ask again.</p>`}catch(e){$('#msg').innerHTML=`<span class=err>${e.message}</span>`}};
-</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Confirm your delivery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+      integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="page">
+
+<header class="page-head">
+  <h1>Your delivery</h1>
+  <button class="theme-btn" id="theme-btn" onclick="toggleTheme()">☾ Dark</button>
+</header>
+
+<div id="info" class="card">Loading your delivery details…</div>
+
+<div id="map-section" hidden>
+  <p class="text-mute" style="margin:0 0 8px;font-size:.88rem">Drag the pin to exactly where you'll be waiting for the driver.</p>
+  <div class="map-wrap"><div id="map" style="height:360px"></div></div>
+  <button class="btn btn-secondary btn-sm" id="gps-btn" style="margin-top:6px">📍 Use my current location</button>
+</div>
+
+<div id="actions" hidden style="margin-top:18px">
+  <div class="btn-group">
+    <button class="btn btn-primary" id="yes-btn">I'll be here</button>
+    <button class="btn btn-secondary" id="no-btn">I can't receive it today</button>
+  </div>
+  <p id="act-msg" class="text-err" style="margin-top:8px;min-height:1.2em"></p>
+</div>
+
+<div id="done" hidden></div>
+
+</div>
+<script src="app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"
+        integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"
+        integrity="sha384-QfbOCebHNw8pQiPAOd2IFee2v2A5VYZxBk0+JGZ5H+3mfzVIp6zsQNkTsfGJot93" crossorigin="anonymous"></script>
+<script>
+const token = new URLSearchParams(location.search).get('t');
+let pin = null, _map = null;
+
+(async () => {
+  try {
+    const [o, region] = await Promise.all([
+      api('GET', '/api/confirm/' + token),
+      api('GET', '/api/region'),
+    ]);
+    pin = { lat: o.lat, lng: o.lng };
+    $('#info').innerHTML = `
+      <strong>${o.from}</strong> is sending you a parcel on <strong>${o.serviceDate}</strong>.
+      ${o.confirmed ? '<br><span class="text-mute">You\'ve already confirmed. You can move the pin and confirm again.</span>' : ''}`;
+    _map = tileMap($('#map'), region, {
+      height: '360px', zoom: 14, center: [pin.lng, pin.lat],
+      markers: [{ lat: pin.lat, lng: pin.lng, type: 'drag', label: '📦', draggable: true,
+                  popup: 'Drag to your exact address', onDrag: p => { pin = p; } }],
+    });
+    $('#map-section').hidden = false;
+    $('#actions').hidden = false;
+  } catch (e) {
+    $('#info').innerHTML = `<span class="text-err">${e.message}. Check the link and try again.</span>`;
+  }
+})();
+
+$('#gps-btn').onclick = () => {
+  navigator.geolocation?.getCurrentPosition(
+    p => {
+      pin = { lat: p.coords.latitude, lng: p.coords.longitude };
+      if (_map) {
+        _map.setMarkers([{ lat: pin.lat, lng: pin.lng, type: 'drag', label: '📦', draggable: true,
+                           popup: 'Your location', onDrag: q => { pin = q; } }]);
+        _map.map.flyTo({ center: [pin.lng, pin.lat], zoom: 15 });
+      }
+    },
+    () => { $('#act-msg').textContent = "Couldn't read your location. Move the pin on the map instead."; },
+  );
+};
+
+$('#yes-btn').onclick = async () => {
+  try {
+    const r = await api('POST', '/api/confirm/' + token, { available: true, ...pin });
+    $('#map-section').hidden = true; $('#actions').hidden = true; $('#done').hidden = false;
+    $('#done').innerHTML = `
+      <div class="card">
+        <p class="text-ok" style="font-weight:600;margin:0 0 10px">Confirmed for ${r.serviceDate}</p>
+        <p style="margin:0 0 8px">Your delivery code — tell the driver this when they hand over the parcel:</p>
+        <div class="amount-large" style="letter-spacing:.12em;margin-bottom:12px">${r.deliveryCode}</div>
+        <p class="text-mute" style="margin:0">Keep this code to yourself until the driver arrives.</p>
+      </div>`;
+  } catch (e) { $('#act-msg').textContent = e.message + '. Please try again.'; }
+};
+
+$('#no-btn').onclick = async () => {
+  try {
+    const r = await api('POST', '/api/confirm/' + token, { available: false });
+    $('#actions').hidden = true; $('#done').hidden = false;
+    $('#done').innerHTML = `<div class="card"><p>No problem. We've moved your delivery to ${r.serviceDate} and will send you a new link then.</p></div>`;
+  } catch (e) { $('#act-msg').textContent = e.message + '. Please try again.'; }
+};
+</script>
+</body>
+</html>
