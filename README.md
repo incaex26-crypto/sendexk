@@ -4,10 +4,10 @@ Same-day batched delivery for independent drivers in dense areas. One app, one d
 Needs **Node 22.5+**. No `npm install` (zero dependencies; uses built-in `node:sqlite`).
 
 ```
-npm test            # 35 tests: pricing, rules, full order flow, HTTP API
+npm test            # tests: pricing, rules, full order flow, HTTP API, driver login
 npm run simulate    # a seeded full day (70 orders, 12 drivers) printed as a report
 npm run seed        # fill data/app.db with a morning of orders and drivers
-npm start           # http://localhost:3000  (admin key: dev-admin, driver ids 1-12 after seed)
+npm run dev         # http://localhost:3000  (admin key: dev-admin; after seed, log in on the driver page with phone 0710000000; login codes show on screen)
 npm run new-region -- za-cpt "Cape Town" -33.92 18.42 Africa/Johannesburg ZAR ZA
 ```
 
@@ -28,10 +28,10 @@ npm run new-region -- za-cpt "Cape Town" -33.92 18.42 Africa/Johannesburg ZAR ZA
 | `server.js` | Plain `node:http` server and routes |
 
 ## What is real and what is a stand-in
-- **Real:** pricing, batching, state machine, confirmation tokens (hashed, expiring), delivery codes (attempt limit), idempotent booking, atomic run acceptance, ledger, payouts with holdback, hotspots, ETA, region config.
+- **Real:** driver phone login (one-time code, hashed, 5-minute expiry, try and request limits; 30-day sessions), pricing, batching, state machine, confirmation tokens (hashed, expiring), delivery codes (attempt limit), idempotent booking, atomic run acceptance, ledger, payouts with holdback, hotspots, ETA, region config.
 - **Stand-in, replace before launch:**
   - Payment: `POST /api/orders/:id/pay` is a mock. Replace with Paystack/PayFast checkout plus a signature-verified webhook that calls `markPaid`.
-  - Driver login: the `x-driver-id` header is not secure. Use phone OTP and signed sessions.
+  - Login codes: shown on screen in test mode because no SMS provider is connected; on a live server (`NODE_ENV=production`) asking for a code is refused until one is.
   - SMS/WhatsApp: confirmation links are returned in the API response. Send them through a messaging provider.
   - Admin: one shared key in `ADMIN_KEY`. Use real accounts.
   - Maps: pages use a schematic SVG map. Swap in MapLibre + PMTiles; `geo.js` keeps haversine until you plug in OSRM behind `roadKm`.

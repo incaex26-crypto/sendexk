@@ -37,6 +37,13 @@ CREATE TABLE IF NOT EXISTS ledger (
 CREATE INDEX IF NOT EXISTS ix_ledger_account ON ledger(account);
 CREATE TABLE IF NOT EXISTS pings (id INTEGER PRIMARY KEY, driver_id INTEGER, at INTEGER, lat REAL, lng REAL);
 CREATE TABLE IF NOT EXISTS hotspots (region_id TEXT, cell TEXT, score REAL, lat REAL, lng REAL, at INTEGER, PRIMARY KEY(region_id, cell));
+CREATE UNIQUE INDEX IF NOT EXISTS ux_drivers_phone ON drivers(region_id, phone);
+CREATE TABLE IF NOT EXISTS otps (
+  id INTEGER PRIMARY KEY, region_id TEXT, phone TEXT NOT NULL, driver_id INTEGER, salt TEXT, code_hash TEXT,
+  attempts INTEGER DEFAULT 0, created_at INTEGER, expires_at INTEGER, used_at INTEGER);
+CREATE INDEX IF NOT EXISTS ix_otps_phone ON otps(region_id, phone, created_at);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY, driver_id INTEGER NOT NULL, region_id TEXT, created_at INTEGER, expires_at INTEGER, revoked_at INTEGER);
 CREATE TABLE IF NOT EXISTS payouts (id INTEGER PRIMARY KEY, driver_id INTEGER, at INTEGER, amount_cents INTEGER, holdback_cents INTEGER, status TEXT);
 `;
 

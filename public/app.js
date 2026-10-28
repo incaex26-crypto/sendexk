@@ -2,10 +2,23 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
-// Format whole cents as "R125.00" (South African rand)
+// Format whole cents as "R125.00"
 const R = (cents) => 'R' + (cents / 100).toFixed(2);
 
-// JSON API helper
+// Format a date string as "Thu 29 Oct"
+function fmtDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+// Format an ISO timestamp as "14:35"
+function fmtTime(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
+}
+
+// JSON API helper — throws on non-2xx with a plain error message
 async function api(method, path, body, headers = {}) {
   const r = await fetch(path, {
     method,
@@ -33,17 +46,17 @@ function _buildStyle(tileUrl) {
     sources: {
       base: {
         type: 'vector', url: tileUrl,
-        attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
+        attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
       },
     },
     layers: [
-      { id: 'bg',      type: 'background', paint: { 'background-color': '#f0ece6' } },
-      { id: 'earth',   type: 'fill',   source: 'base', 'source-layer': 'earth',    paint: { 'fill-color': '#f0ece6' } },
-      { id: 'water',   type: 'fill',   source: 'base', 'source-layer': 'water',    paint: { 'fill-color': '#a8d0e6' } },
-      { id: 'landuse', type: 'fill',   source: 'base', 'source-layer': 'landuse',  paint: { 'fill-color': '#dff0d0', 'fill-opacity': 0.5 } },
-      { id: 'buildings', type: 'fill', source: 'base', 'source-layer': 'buildings', minzoom: 13, paint: { 'fill-color': '#d8d4cc', 'fill-outline-color': '#b0aba4' } },
-      { id: 'roads',       type: 'line', source: 'base', 'source-layer': 'roads',
-        paint: { 'line-color': '#ffffff', 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 16, 4] } },
+      { id: 'bg',       type: 'background', paint: { 'background-color': '#f0ece6' } },
+      { id: 'earth',    type: 'fill',   source: 'base', 'source-layer': 'earth',    paint: { 'fill-color': '#f0ece6' } },
+      { id: 'water',    type: 'fill',   source: 'base', 'source-layer': 'water',    paint: { 'fill-color': '#a8d0e6' } },
+      { id: 'landuse',  type: 'fill',   source: 'base', 'source-layer': 'landuse',  paint: { 'fill-color': '#dff0d0', 'fill-opacity': 0.5 } },
+      { id: 'buildings', type: 'fill',  source: 'base', 'source-layer': 'buildings', minzoom: 13, paint: { 'fill-color': '#d8d4cc', 'fill-outline-color': '#b0aba4' } },
+      { id: 'roads',    type: 'line',   source: 'base', 'source-layer': 'roads',
+        paint: { 'line-color': '#fff', 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 16, 4] } },
       { id: 'roads_major', type: 'line', source: 'base', 'source-layer': 'roads',
         filter: ['in', ['get', 'pmap:kind'], ['literal', ['highway', 'major_road']]],
         paint: { 'line-color': '#f0e070', 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1.5, 16, 8] } },
@@ -53,20 +66,20 @@ function _buildStyle(tileUrl) {
 
 /**
  * Create a MapLibre map in el.
- * marker shape: { lat, lng, type: 'pickup'|'drop'|'driver'|'drag', label?, draggable?, onDrag?, popup? }
+ * marker: { lat, lng, type: 'pickup'|'drop'|'driver'|'drag', label?, draggable?, onDrag?, popup? }
  * Returns { setMarkers(list), map, remove() } or null if libs not loaded.
  */
 function tileMap(el, region, { height = '360px', center, zoom = 11, onPickup, onDrop, markers = [] } = {}) {
   if (!window.maplibregl || !window.pmtiles) {
-    el.innerHTML = '<div class="map-fallback">Map not available. Download tiles first: <code>npm run get-map</code></div>';
+    el.innerHTML = '<div class="map-fallback">Map not available. Run <code>npm run get-map</code> in the terminal, then reload this page.</div>';
     return null;
   }
   _ensureProtocol();
   el.style.height = height;
 
-  const tilesPath = (region.map && region.map.tilesUrl) || '/maps/jhb.pmtiles';
+  const tilesPath = (region && region.map && region.map.tilesUrl) || '/maps/jhb.pmtiles';
   const tileUrl = 'pmtiles://' + location.origin + tilesPath;
-  const c = center || [region.center.lng, region.center.lat];
+  const c = center || (region && region.center ? [region.center.lng, region.center.lat] : [28.05, -26.10]);
 
   const map = new maplibregl.Map({ container: el, style: _buildStyle(tileUrl), center: c, zoom, attributionControl: true });
 
@@ -78,7 +91,8 @@ function tileMap(el, region, { height = '360px', center, zoom = 11, onPickup, on
     _active.length = 0;
     list.forEach(p => {
       const div = document.createElement('div');
-      div.className = 'map-marker' + (p.type === 'drop' ? ' drop' : p.type === 'driver' ? ' driver' : p.type === 'drag' ? ' drag' : '');
+      div.className = 'map-marker'
+        + (p.type === 'drop' ? ' drop' : p.type === 'driver' ? ' driver' : p.type === 'drag' ? ' drag' : '');
       if (p.label != null) div.textContent = p.label;
       const m = new maplibregl.Marker({ element: div, draggable: !!p.draggable })
         .setLngLat([p.lng, p.lat]).addTo(map);
@@ -97,7 +111,7 @@ function tileMap(el, region, { height = '360px', center, zoom = 11, onPickup, on
   map.on('error', (e) => {
     if (e.error && String(e.error).includes('404')) {
       map.remove();
-      el.innerHTML = '<div class="map-fallback">Tile file not found. Run <code>npm run get-map</code>, then reload.</div>';
+      el.innerHTML = '<div class="map-fallback">Map tiles not found. Run <code>npm run get-map</code> in the terminal, then reload this page.</div>';
     }
   });
 
@@ -137,7 +151,7 @@ function toggleTheme() {
 }
 function _updateThemeBtn() {
   const btn = document.getElementById('theme-btn');
-  if (btn) btn.textContent = _isDark() ? '☀ Light' : '☾ Dark';
+  if (btn) btn.textContent = _isDark() ? 'Light mode' : 'Dark mode';
 }
 (function initTheme() {
   try { const s = localStorage.getItem('theme'); if (s) document.documentElement.dataset.theme = s; } catch {}

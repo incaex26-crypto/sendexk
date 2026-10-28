@@ -12,6 +12,7 @@ const C = require('./confirm');
 const batching = require('./batching');
 const hot = require('./hotspots');
 const ETA = require('./eta');
+const { normalizePhone } = require('./phone');
 
 const DAY = 86400000;
 const err = (status, message) => Object.assign(new Error(message), { status });
@@ -63,7 +64,10 @@ function createAccount(db, region, { kind = 'business', name, phone, email, lat,
 }
 function createDriver(db, region, { name, phone, vehicle }) {
   if (!region.vehicles[vehicle]) throw err(400, `unknown vehicle ${vehicle}`);
-  const r = db.prepare('INSERT INTO drivers (region_id,name,phone,vehicle,created_at) VALUES (?,?,?,?,?)').run(region.id, name, phone || null, vehicle, clock.now());
+  // Stored normalised so phone login finds the driver however the number was typed.
+  const p = phone ? normalizePhone(region, phone) : null;
+  if (p && db.prepare('SELECT 1 FROM drivers WHERE region_id=? AND phone=?').get(region.id, p)) throw err(409, 'a driver with this phone already exists');
+  const r = db.prepare('INSERT INTO drivers (region_id,name,phone,vehicle,created_at) VALUES (?,?,?,?,?)').run(region.id, name, p, vehicle, clock.now());
   return Number(r.lastInsertRowid);
 }
 const driverTier = (d) => (d.pro_until > clock.now() ? 'pro' : 'standard');
@@ -419,5 +423,5 @@ function overview(db, region) {
 
 module.exports = {
   loadRegions, localParts, addDays, today, createAccount, createDriver, buyPro, quote, createOrder, markPaid, previewConfirm, confirm, sweepUnconfirmed,
-  dispatch, listOpenRuns, acceptRun, releaseRun, scan, ping, setPin, track, refreshHotspots, currentHotspots, runPayouts, releaseHoldbacks, overview, getOrder, driverTier, err,
+  dispatch, listOpenRuns, acceptRun, releaseRun, scan, ping, setPin, track, refreshHotspots, currentHotspots, runPayouts, releaseHoldbacks, overview, getOrder, driverTier, err, log,
 };

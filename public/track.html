@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Track your delivery — SenDexk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+      integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
+<link rel="stylesheet" href="app.css">
+<style>
+  .status-line { font-size: 1.15rem; font-weight: 600; margin-bottom: 4px; }
+  .eta-block { margin: 14px 0; padding: 14px 16px; background: var(--faint); border-radius: var(--radius); border-left: 3px solid var(--accent); }
+  .code-block { margin-top: 16px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); }
+  .code-display { font-size: 2rem; font-weight: 700; letter-spacing: .14em; color: var(--accent); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="page-head">
+  <h1 id="brand">SenDexk</h1>
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <nav>
+      <a href="/">Book a delivery</a>
+      <a href="/track.html" class="active">Track</a>
+    </nav>
+    <button class="theme-btn" id="theme-btn" onclick="toggleTheme()">Dark mode</button>
+  </div>
+</header>
+
+<!-- Search form (no order id in URL) -->
+<div id="lookup-form">
+  <div class="field" style="max-width:300px">
+    <label>Order number</label>
+    <div style="display:flex;gap:8px">
+      <input id="order-id-input" type="number" placeholder="e.g. 42" inputmode="numeric" style="width:auto;flex:1">
+      <button class="btn btn-primary btn-sm" style="width:auto" onclick="loadOrder()">Track</button>
+    </div>
+  </div>
+</div>
+
+<div id="track-out"></div>
+
+</div>
+
+<script src="app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"
+        integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"
+        integrity="sha384-QfbOCebHNw8pQiPAOd2IFee2v2A5VYZxBk0+JGZ5H+3mfzVIp6zsQNkTsfGJot93" crossorigin="anonymous"></script>
+<script>
+let _map = null, _timer = null, _orderId = null;
+
+const STATUS_LABELS = {
+  awaiting_payment:      'Awaiting payment',
+  awaiting_confirmation: 'Waiting for recipient to confirm address',
+  confirmed:             'Address confirmed — ready for collection',
+  batched:               'Assigned to a driver run',
+  collected:             'Collected — on the way',
+  out_for_delivery:      'Out for delivery',
+  delivered:             'Delivered',
+  failed:                'Delivery attempted — could not complete',
+  cancelled:             'Cancelled',
+};
+
+(async () => {
+  const params = new URLSearchParams(location.search);
+  const id = params.get('id');
+  if (id) { $('#order-id-input').value = id; await loadOrder(id); }
+})();
+
+async function loadOrder(id) {
+  id = id || $('#order-id-input').value;
+  if (!id) return;
+  _orderId = id;
+  history.replaceState(null, '', '/track.html?id=' + id);
+  $('#track-out').innerHTML = '<p class="text-mute">Loading…</p>';
+  if (_timer) clearInterval(_timer);
+  await renderTrack();
+  _timer = setInterval(renderTrack, 15000);
+}
+
+async function renderTrack() {
+  let o, region;
+  try {
+    [o, region] = await Promise.all([
+      api('GET', '/api/orders/' + _orderId + '/track'),
+      api('GET', '/api/region'),
+    ]);
+  } catch (e) {
+    $('#track-out').innerHTML = `<p class="text-err">${e.message}. Check the order number and try again.</p>`;
+    if (_timer) clearInterval(_timer);
+    return;
+  }
+
+  const label = STATUS_LABELS[o.status] || o.status;
+  const driverName = o.driver ? o.driver.name.split(' ')[0] : null;
+
+  let etaHtml = '';
+  if (o.eta && o.status === 'out_for_delivery') {
+    const from = fmtTime(new Date(o.eta.from * 1000).toISOString());
+    const to   = fmtTime(new Date(o.eta.to   * 1000).toISOString());
+    etaHtml = `
+      <div class="eta-block">
+        <div class="text-mute" style="font-size:.75rem;margin-bottom:3px">Estimated arrival</div>
+        <div style="font-size:1.05rem;font-weight:600">${from} – ${to}</div>
+        ${driverName ? `<div class="text-mute">Your driver: ${driverName}</div>` : ''}
+      </div>`;
+  } else if (driverName && ['collected', 'batched'].includes(o.status)) {
+    etaHtml = `<div class="eta-block"><div class="text-mute" style="font-size:.75rem;margin-bottom:2px">Your driver</div><div style="font-weight:600">${driverName}</div></div>`;
+  }
+
+  let codeHtml = '';
+  if (o.deliveryCode && ['out_for_delivery', 'collected'].includes(o.status)) {
+    codeHtml = `
+      <div class="code-block">
+        <div class="text-mute" style="font-size:.75rem;margin-bottom:6px">Your delivery code — share this only when the driver arrives</div>
+        <div class="code-display">${o.deliveryCode}</div>
+      </div>`;
+  }
+
+  $('#track-out').innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <div class="text-mute" style="font-size:.75rem;margin-bottom:6px">Order ${_orderId}</div>
+      <div class="status-line">${label}</div>
+      <div class="text-mute">${fmtDate(o.serviceDate)}</div>
+      ${etaHtml}
+      ${codeHtml}
+    </div>
+    <div id="track-map-wrap" class="map-wrap"><div id="track-map" style="height:300px"></div></div>`;
+
+  if (['delivered', 'cancelled', 'failed'].includes(o.status) && _timer) {
+    clearInterval(_timer); _timer = null;
+  }
+
+  if (!_map) {
+    _map = tileMap($('#track-map'), region, {
+      height: '300px', zoom: 14,
+      center: o.drop ? [o.drop.lng, o.drop.lat] : undefined,
+    });
+  }
+
+  if (_map) {
+    const markers = [];
+    if (o.drop) markers.push({ lat: o.drop.lat, lng: o.drop.lng, type: 'drop', label: 'D', popup: 'Drop-off address' });
+    if (o.driver && o.driver.lat) markers.push({ lat: o.driver.lat, lng: o.driver.lng, type: 'driver', label: 'V', popup: driverName || 'Driver' });
+    _map.setMarkers(markers);
+  }
+}
+</script>
+</body>
+</html>
