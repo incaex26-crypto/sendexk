@@ -5,7 +5,7 @@ const path = require('node:path');
 const { open } = require('./src/db');
 const S = require('./src/service');
 
-const ADMIN_KEY = process.env.ADMIN_KEY || 'dev-admin';
+const A = require('./src/auth');
 const PUBLIC = path.join(__dirname, 'public');
 const MAPS_DIR = path.join(__dirname, 'data', 'maps');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' };
@@ -43,13 +43,27 @@ function createApp({ db, regions }) {
   add('POST', '/api/driver/pro', ({ region, driver }) => S.buyPro(db, region, driver), { driver: true }); // mock payment
   add('POST', '/api/driver/scan/:orderId', ({ region, params, body, driver }) => { const r = S.scan(db, region, +params.orderId, driver, body.action, body); if (r.error) return { status: r.status, body: { error: r.error } }; return { order: pub(r.order), eta: r.eta }; }, { driver: true });
 
+  // ---- driver login (phone OTP) ----
+  add('POST', '/api/driver/otp', ({ body, req }) => A.requestOtp(db, body.phone, req.headers['x-device-id'] || req.socket.remoteAddress));
+  add('POST', '/api/driver/verify', ({ body }) => { const r = A.verifyOtp(db, body.phone, body.code); return { driverId: r.driverId, token: r.token }; });
+
   // ---- admin ----
+  add('POST', '/api/admin/login', ({ body, res }) => {
+    const token = A.adminLogin(db, body.email, body.password);
+    res.setHeader('set-cookie', `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+    return { ok: true };
+  });
+  add('POST', '/api/admin/logout', ({ req, res }) => { const t = cookieOf(req); if (t) A.endSession(db, t); res.setHeader('set-cookie', `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`); return { ok: true }; });
   add('GET', '/api/admin/overview', ({ region }) => S.overview(db, region), { admin: true });
   add('POST', '/api/admin/dispatch', ({ region, body }) => S.dispatch(db, region, body.date), { admin: true });
   add('POST', '/api/admin/sweep', ({ region }) => S.sweepUnconfirmed(db, region), { admin: true });
   add('POST', '/api/admin/hotspots', ({ region }) => S.refreshHotspots(db, region), { admin: true });
   add('POST', '/api/admin/payouts', ({ region }) => S.runPayouts(db, region), { admin: true });
   add('GET', '/api/admin/orders/:id', ({ params }) => ({ order: pub(S.getOrder(db, +params.id)), events: db.prepare("SELECT * FROM events WHERE entity='order' AND entity_id=? ORDER BY id").all(+params.id) }), { admin: true });
+
+  const COOKIE = 'admin_session';
+  const cookieOf = (req) => { const m = new RegExp(`(?:^|;\\s*)${COOKIE}=([0-9a-f]+)`).exec(req.headers.cookie || ''); return m && m[1]; };
+  A.cleanup(db); setInterval(() => A.cleanup(db), 3600_000).unref(); // hourly tidy-up of expired codes, sessions, limits
 
   function pub(o) { const { token_hash, code_hash, idem_key, ...rest } = o; return rest; }
 
@@ -60,11 +74,15 @@ function createApp({ db, regions }) {
       for (const r of routes) {
         if (r.method !== req.method) continue;
         const m = r.re.exec(url.pathname); if (!m) continue;
-        if (r.opts.admin && req.headers['x-admin-key'] !== ADMIN_KEY) return send(res, 401, { error: 'admin key required' });
+        if (r.opts.admin && !A.sessionSubject(db, 'admin', cookieOf(req))) return send(res, 401, { error: 'Admin login required.' });
         let driver = null;
-        if (r.opts.driver) { driver = Number(req.headers['x-driver-id']); if (!driver) return send(res, 401, { error: 'x-driver-id required' }); }
+        if (r.opts.driver) {
+          const auth = req.headers.authorization || '';
+          driver = A.driverFromRequest(db, auth.startsWith('Bearer ') ? auth.slice(7) : null, req.headers['x-driver-id']);
+          if (!driver) return send(res, 401, { error: 'Driver login required.' });
+        }
         const body = (req.method === 'POST' || req.method === 'PUT') ? await readJson(req) : {};
-        const out = await r.handler({ req, url, region: regionOf(url), params: m.groups || {}, body, driver });
+        const out = await r.handler({ req, res, url, region: regionOf(url), params: m.groups || {}, body, driver });
         if (out && out.status && out.body) return send(res, out.status, out.body);
         return send(res, 200, out);
       }
@@ -119,6 +137,6 @@ function serveRange(file, req, res) {
 if (require.main === module) {
   const db = open(process.env.DB || path.join(__dirname, 'data', 'app.db')), regions = S.loadRegions(db);
   const port = Number(process.env.PORT || 3000);
-  createApp({ db, regions }).listen(port, () => console.log(`Dispatch starter on http://localhost:${port}  (regions: ${Object.keys(regions).join(', ')})  admin key: ${ADMIN_KEY}`));
+  createApp({ db, regions }).listen(port, () => console.log(`Dispatch starter on http://localhost:${port}  (regions: ${Object.keys(regions).join(', ')})`));
 }
 module.exports = { createApp };

@@ -1,12 +1,16 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin</title><link rel="stylesheet" href="app.css"></head><body>
 <h1>Admin board</h1><nav><a href="/">Book</a><a href="/driver.html">Driver</a><a href="/admin.html">Admin</a></nav>
-<div class="card row"><button id="sweep" class="alt">Roll unconfirmed</button><button id="hot" class="alt">Refresh hotspots</button><button id="disp">Dispatch</button><button id="pay" class="alt">Run payouts</button></div>
-<div id="stats"></div><div id="mapbox"></div><div id="ev"></div>
+<div id="login" class="card" hidden><h2>Admin login</h2><input id="em" type="email" placeholder="Email" autocomplete="username"><input id="pw" type="password" placeholder="Password" autocomplete="current-password"><button id="go">Log in</button><div id="lerr" class="err"></div></div>
+<div id="board"><div class="card row"><button id="out" class="alt">Log out</button><button id="sweep" class="alt">Roll unconfirmed</button><button id="hot" class="alt">Refresh hotspots</button><button id="disp">Dispatch</button><button id="pay" class="alt">Run payouts</button></div>
+<div id="stats"></div><div id="mapbox"></div><div id="ev"></div></div>
 <script src="app.js"></script><script>
-const H={'x-admin-key':new URLSearchParams(location.search).get('key')||'dev-admin'};let region,map;
+const H={};let region,map,timer;
+function show(inn){$('#login').hidden=inn;$('#board').hidden=!inn}
+$('#go').onclick=async()=>{try{await api('POST','/api/admin/login',{email:$('#em').value,password:$('#pw').value});$('#pw').value='';$('#lerr').textContent='';load()}catch(e){$('#lerr').textContent=e.message}};
+$('#out').onclick=async()=>{await api('POST','/api/admin/logout',{});show(false)};
 const act=(id,p)=>$(id).onclick=async()=>{try{await api('POST',p,{},H);load()}catch(e){alert(e.message)}};
 act('#sweep','/api/admin/sweep');act('#hot','/api/admin/hotspots');act('#disp','/api/admin/dispatch');act('#pay','/api/admin/payouts');
-async function load(){region=region||await api('GET','/api/region');const o=await api('GET','/api/admin/overview',null,H);
+async function load(){region=region||await api('GET','/api/region');let o;try{o=await api('GET','/api/admin/overview',null,H)}catch(e){show(false);return}show(true);
 $('#stats').innerHTML=`<div class=card><b>Orders</b> ${Object.entries(o.orders).map(([k,v])=>`<span class=pill>${k}: ${v}</span>`).join(' ')||'none'}<br><b>Runs</b> ${Object.entries(o.runs).map(([k,v])=>`<span class=pill>${k}: ${v}</span>`).join(' ')||'none'}
 <div class=row style="margin-top:.6rem"><div><div class=mute>Platform revenue</div><div class=big>${R(o.money.revenue)}</div></div><div><div class=mute>Held in escrow</div><div class=big>${R(o.money.escrow)}</div></div><div><div class=mute>Owed to drivers</div><div class=big>${R(o.money.driverPayable)}</div></div></div>
 <div class=${o.money.ledgerBalanced?'ok':'err'}>Ledger ${o.money.ledgerBalanced?'balanced':'NOT BALANCED'}</div></div>`;

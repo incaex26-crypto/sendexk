@@ -41,3 +41,10 @@ All of `docs/`, `CLAUDE.md`, `AGENTS.md`, `.claude/commands/`, `.github/workflow
 - Map commands in docs/05 are unrun. Run and correct them in Phase 2.
 - The user is a beginner. Explain each step. Never push to main.
 - Phase 1b depends on the open item that stores keep a margin or not (decision 11); build it so the commission is a config value that can be zero.
+
+## T1 Security hardening (done, branch feat/t1)
+- `src/auth.js`: admin_users (scrypt + 16-byte salt), sessions (hashed 32-byte token, 8h, HttpOnly SameSite=Strict cookie), phone OTP with SQLite rate limits, admin login lock, `suspendDriver`, hourly `cleanup`.
+- Admin key is gone. Create an admin: `ADMIN_PASSWORD='...' node scripts/create-admin.js you@example.com`. Login screen is in `public/admin.html`.
+- Driver routes accept `Authorization: Bearer <token>` from `/api/driver/otp` + `/api/driver/verify`; the old `x-driver-id` header still works (dev only) but suspended drivers are refused.
+- OTP code is returned as `devCode` outside production; a real SMS provider is still to be chosen.
+- No admin UI button for suspending yet (call `suspendDriver`). Tests: `test/auth.test.js`.
