@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Business — SenDexk</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+.stat-row{display:flex;gap:10px;margin:10px 0}
+.stat{flex:1;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+.stat .num{font-size:1.6rem;font-weight:700;color:var(--blue-light)}
+.topup-btns{display:flex;gap:8px;flex-wrap:wrap;margin:.6rem 0}
+.topup-btns button{width:auto;padding:.5rem 1rem;flex:1;min-width:80px}
+.stmt-row td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.credit{color:var(--ok)}.debit{color:var(--danger)}
+#section-login,#section-dash{display:none}
+</style>
+</head>
+<body>
+<nav><a href="/">Book</a> <a href="/track.html">Track</a> <strong>Business</strong></nav>
+<h1>Business account</h1>
+
+<div id="section-login">
+  <div class="card">
+    <h2>Sign in</h2>
+    <label>Business phone number</label>
+    <input id="phone" type="tel" placeholder="e.g. 0820000000">
+    <button id="btn-otp">Send code</button>
+    <div id="otp-step" style="display:none">
+      <label>6-digit code</label>
+      <input id="code" type="text" maxlength="6" placeholder="123456">
+      <button id="btn-verify">Sign in</button>
+    </div>
+    <p class="mute" id="login-msg"></p>
+  </div>
+</div>
+
+<div id="section-dash">
+  <div class="stat-row">
+    <div class="stat"><div class="num" id="wallet-bal">R0.00</div><div class="mute">Wallet balance</div></div>
+    <div class="stat"><div class="num" id="orders-count">0</div><div class="mute">Orders today</div></div>
+  </div>
+  <div class="card">
+    <h2>Top up wallet</h2>
+    <div class="topup-btns">
+      <button onclick="topup(20000)">R200</button>
+      <button onclick="topup(50000)">R500</button>
+      <button onclick="topup(100000)">R1 000</button>
+      <button onclick="topup(200000)">R2 000</button>
+    </div>
+    <label>Custom amount (min R100)</label>
+    <div class="row">
+      <input id="custom-amt" type="number" placeholder="Amount in Rand" min="100" step="100">
+      <button onclick="topupCustom()" style="margin-top:0">Top up</button>
+    </div>
+    <p id="topup-msg" class="mute"></p>
+  </div>
+  <div class="card">
+    <h2>Statement <span class="mute" style="font-size:.8rem">(last 50)</span></h2>
+    <table>
+      <thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Amount</th><th style="text-align:right">Balance</th></tr></thead>
+      <tbody id="stmt-body"><tr><td colspan="4" class="mute">No transactions yet.</td></tr></tbody>
+    </table>
+    <button class="alt" onclick="downloadCsv()" style="margin-top:10px;width:auto;padding:.4rem .9rem">Download CSV</button>
+  </div>
+  <div class="card">
+    <h2>Book a delivery for your customer</h2>
+    <a href="/" style="color:var(--brand)">Go to booking page →</a>
+    <p class="mute" style="margin-top:6px">Your account is charged from your wallet at dispatch. Delivery link mode lets you embed a pay-by-link in your checkout.</p>
+  </div>
+</div>
+
+<p id="global-err" class="err" style="display:none"></p>
+
+<script src="/app.js"></script>
+<script>
+let accountId = null;
+const R = (c) => 'R' + (c / 100).toFixed(2);
+
+function showDash() {
+  $('#section-login').style.display = 'none';
+  $('#section-dash').style.display = '';
+  loadWallet();
+}
+
+async function sendOtp() {
+  const phone = $('#phone').value.trim();
+  if (!phone) return;
+  try {
+    await api('POST', '/api/driver/otp', { phone });
+    $('#otp-step').style.display = '';
+    $('#login-msg').textContent = 'Code sent. Check your phone.';
+  } catch (e) { $('#login-msg').textContent = e.message; }
+}
+
+async function verify() {
+  const phone = $('#phone').value.trim(), code = $('#code').value.trim();
+  try {
+    // Reuse driver OTP endpoint; businesses register as accounts separately (see GAPS.md)
+    const r = await api('POST', '/api/driver/verify', { phone, code });
+    accountId = r.driverId;
+    localStorage.setItem('biz_account', accountId);
+    showDash();
+  } catch (e) { $('#login-msg').textContent = e.message; }
+}
+
+async function loadWallet() {
+  try {
+    const r = await api('GET', `/api/wallet`, null, { 'x-account-id': String(accountId) });
+    $('#wallet-bal').textContent = R(r.balanceCents);
+    renderStatement(r.statement);
+  } catch (e) { showErr(e.message); }
+}
+
+function renderStatement(rows) {
+  const body = $('#stmt-body');
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="4" class="mute">No transactions yet.</td></tr>'; return; }
+  body.innerHTML = rows.map((r) => {
+    const sign = r.amountCents >= 0 ? 'credit' : 'debit';
+    const amt = (r.amountCents >= 0 ? '+' : '') + R(r.amountCents);
+    return `<tr><td>${fmtDate(new Date(r.at).toISOString())}</td><td>${r.memo}</td><td class="${sign}" style="text-align:right">${amt}</td><td style="text-align:right">${R(r.balanceCents)}</td></tr>`;
+  }).join('');
+}
+
+async function topup(cents) {
+  try {
+    const r = await api('POST', '/api/wallet/topup', { cents }, { 'x-account-id': String(accountId) });
+    $('#wallet-bal').textContent = R(r.balanceCents);
+    $('#topup-msg').textContent = `Topped up. New balance: ${R(r.balanceCents)}`;
+    loadWallet();
+  } catch (e) { $('#topup-msg').textContent = e.message; }
+}
+
+function topupCustom() {
+  const rand = Number($('#custom-amt').value);
+  if (!rand || rand < 100) { $('#topup-msg').textContent = 'Minimum top-up is R100.'; return; }
+  topup(Math.round(rand * 100));
+}
+
+function downloadCsv() {
+  api('GET', `/api/wallet`, null, { 'x-account-id': String(accountId) }).then((r) => {
+    const lines = ['Date,Description,Amount,Balance', ...r.statement.map((s) => `${new Date(s.at).toISOString()},${JSON.stringify(s.memo)},${(s.amountCents/100).toFixed(2)},${(s.balanceCents/100).toFixed(2)}`)];
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
+    a.download = 'statement.csv'; a.click();
+  });
+}
+
+function showErr(msg) { const e = $('#global-err'); e.textContent = msg; e.style.display = ''; }
+
+$('#btn-otp').addEventListener('click', sendOtp);
+$('#btn-verify').addEventListener('click', verify);
+
+// Restore session
+const saved = localStorage.getItem('biz_account');
+if (saved) { accountId = Number(saved); showDash(); }
+else { $('#section-login').style.display = ''; }
+</script>
+</body>
+</html>

@@ -1,21 +1,134 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin</title><link rel="stylesheet" href="app.css"></head><body>
-<h1>Admin board</h1><nav><a href="/">Book</a><a href="/driver.html">Driver</a><a href="/admin.html">Admin</a></nav>
-<div id="login" class="card" hidden><h2>Admin login</h2><input id="em" type="email" placeholder="Email" autocomplete="username"><input id="pw" type="password" placeholder="Password" autocomplete="current-password"><button id="go">Log in</button><div id="lerr" class="err"></div></div>
-<div id="board"><div class="card row"><button id="out" class="alt">Log out</button><button id="sweep" class="alt">Roll unconfirmed</button><button id="hot" class="alt">Refresh hotspots</button><button id="disp">Dispatch</button><button id="pay" class="alt">Run payouts</button></div>
-<div id="stats"></div><div id="mapbox"></div><div id="ev"></div></div>
-<script src="app.js"></script><script>
-const H={};let region,map,timer;
-function show(inn){$('#login').hidden=inn;$('#board').hidden=!inn}
-$('#go').onclick=async()=>{try{await api('POST','/api/admin/login',{email:$('#em').value,password:$('#pw').value});$('#pw').value='';$('#lerr').textContent='';load()}catch(e){$('#lerr').textContent=e.message}};
-$('#out').onclick=async()=>{await api('POST','/api/admin/logout',{});show(false)};
-const act=(id,p)=>$(id).onclick=async()=>{try{await api('POST',p,{},H);load()}catch(e){alert(e.message)}};
-act('#sweep','/api/admin/sweep');act('#hot','/api/admin/hotspots');act('#disp','/api/admin/dispatch');act('#pay','/api/admin/payouts');
-async function load(){region=region||await api('GET','/api/region');let o;try{o=await api('GET','/api/admin/overview',null,H)}catch(e){show(false);return}show(true);
-$('#stats').innerHTML=`<div class=card><b>Orders</b> ${Object.entries(o.orders).map(([k,v])=>`<span class=pill>${k}: ${v}</span>`).join(' ')||'none'}<br><b>Runs</b> ${Object.entries(o.runs).map(([k,v])=>`<span class=pill>${k}: ${v}</span>`).join(' ')||'none'}
-<div class=row style="margin-top:.6rem"><div><div class=mute>Platform revenue</div><div class=big>${R(o.money.revenue)}</div></div><div><div class=mute>Held in escrow</div><div class=big>${R(o.money.escrow)}</div></div><div><div class=mute>Owed to drivers</div><div class=big>${R(o.money.driverPayable)}</div></div></div>
-<div class=${o.money.ledgerBalanced?'ok':'err'}>Ledger ${o.money.ledgerBalanced?'balanced':'NOT BALANCED'}</div></div>`;
-const pins=[...o.hotspots.map(h=>({lat:h.lat,lng:h.lng,r:6+h.score*2,color:'#e8590c',label:'🔥'+h.score})),...o.drivers.filter(d=>d.lat).map(d=>({lat:d.lat,lng:d.lng,r:6,color:'#0f6b5c',label:d.name}))];
-map=mapView($('#mapbox'),region,{pins});
-$('#ev').innerHTML='<h2>Latest events</h2><div class=card><table>'+o.events.map(e=>`<tr><td>${new Date(e.at).toISOString().slice(11,16)}</td><td>${e.entity} #${e.entity_id}</td><td>${e.type}</td><td class=mute>${e.actor}</td></tr>`).join('')+'</table></div>'}
-load();setInterval(load,10000);
-</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin — SenDexk</title>
+<link rel="stylesheet" href="app.css">
+<style>
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--line);margin:.8rem 0}
+.tab{padding:.45rem .9rem;cursor:pointer;border:none;background:none;color:var(--mute);border-bottom:2px solid transparent;font:inherit;font-size:.9rem}
+.tab.active{color:var(--brand);border-bottom-color:var(--brand)}
+.driver-row td:last-child button{padding:.2rem .6rem;margin:0;width:auto;font-size:.8rem;background:var(--danger)}
+.notif-ok{color:var(--ok)}.notif-fail{color:var(--danger)}
+</style>
+</head>
+<body>
+<h1>Admin board</h1>
+<nav><a href="/">Book</a> <a href="/driver.html">Driver</a> <a href="/admin.html">Admin</a></nav>
+<div id="login" class="card" hidden>
+  <h2>Admin login</h2>
+  <input id="em" type="email" placeholder="Email" autocomplete="username">
+  <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+  <button id="go">Log in</button>
+  <div id="lerr" class="err"></div>
+</div>
+<div id="board" hidden>
+  <div class="card row" style="flex-wrap:wrap;gap:6px">
+    <button id="out" class="alt" style="width:auto;padding:.4rem .8rem">Log out</button>
+    <button id="sweep" class="alt" style="width:auto;padding:.4rem .8rem">Roll unconfirmed</button>
+    <button id="hot" class="alt" style="width:auto;padding:.4rem .8rem">Refresh hotspots</button>
+    <button id="disp" style="width:auto;padding:.4rem .8rem">Dispatch</button>
+    <button id="pay" class="alt" style="width:auto;padding:.4rem .8rem">Run payouts</button>
+  </div>
+  <div class="tabs">
+    <button class="tab active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+    <button class="tab" data-tab="drivers" onclick="switchTab('drivers')">Drivers</button>
+    <button class="tab" data-tab="notifications" onclick="switchTab('notifications')">Notifications</button>
+  </div>
+  <div id="tab-overview">
+    <div id="stats"></div>
+    <div id="mapbox"></div>
+    <div id="ev"></div>
+  </div>
+  <div id="tab-drivers" style="display:none">
+    <div id="drivers-list"><p class="mute">Loading…</p></div>
+  </div>
+  <div id="tab-notifications" style="display:none">
+    <div id="notif-list"><p class="mute">Loading…</p></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+const H = {}; let region, map, timer;
+
+function show(inn) { $('#login').hidden = inn; $('#board').hidden = !inn; }
+
+$('#go').onclick = async () => {
+  try { await api('POST', '/api/admin/login', { email: $('#em').value, password: $('#pw').value }); $('#pw').value = ''; $('#lerr').textContent = ''; load(); }
+  catch (e) { $('#lerr').textContent = e.message; }
+};
+$('#out').onclick = async () => { await api('POST', '/api/admin/logout', {}); show(false); };
+
+const act = (id, p) => $(id).onclick = async () => { try { await api('POST', p, {}, H); load(); } catch (e) { alert(e.message); } };
+act('#sweep', '/api/admin/sweep');
+act('#hot', '/api/admin/hotspots');
+act('#disp', '/api/admin/dispatch');
+act('#pay', '/api/admin/payouts');
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
+  $('#tab-overview').style.display = tab === 'overview' ? '' : 'none';
+  $('#tab-drivers').style.display = tab === 'drivers' ? '' : 'none';
+  $('#tab-notifications').style.display = tab === 'notifications' ? '' : 'none';
+  if (tab === 'drivers') loadDrivers();
+  if (tab === 'notifications') loadNotifications();
+}
+
+async function load() {
+  region = region || await api('GET', '/api/region');
+  let o;
+  try { o = await api('GET', '/api/admin/overview', null, H); } catch (e) { show(false); return; }
+  show(true);
+  const wallets = (o.money.wallets || []).filter((w) => w.bal > 0).map((w) => `<span class="pill">${w.account}: ${R(w.bal)}</span>`).join(' ');
+  $('#stats').innerHTML = `<div class="card">
+    <b>Orders</b> ${Object.entries(o.orders).map(([k, v]) => `<span class="pill">${k}: ${v}</span>`).join(' ') || 'none'}<br>
+    <b>Runs</b> ${Object.entries(o.runs).map(([k, v]) => `<span class="pill">${k}: ${v}</span>`).join(' ') || 'none'}
+    <div class="row" style="margin-top:.6rem">
+      <div><div class="mute">Platform revenue</div><div class="big">${R(o.money.revenue)}</div></div>
+      <div><div class="mute">In escrow</div><div class="big">${R(o.money.escrow)}</div></div>
+      <div><div class="mute">Driver payable</div><div class="big">${R(o.money.driverPayable)}</div></div>
+    </div>
+    ${wallets ? `<div style="margin-top:.4rem"><span class="mute">Wallets:</span> ${wallets}</div>` : ''}
+    <div class="${o.money.ledgerBalanced ? 'ok' : 'err'}">Ledger ${o.money.ledgerBalanced ? 'balanced' : 'NOT BALANCED'}</div>
+  </div>`;
+  const pins = [
+    ...o.hotspots.map((h) => ({ lat: h.lat, lng: h.lng, r: 6 + h.score * 2, color: '#e8590c', label: '🔥' + h.score })),
+    ...o.drivers.filter((d) => d.lat).map((d) => ({ lat: d.lat, lng: d.lng, r: 6, color: '#2563eb', label: d.name }))
+  ];
+  map = tileMap($('#mapbox'), region, { pins });
+  $('#ev').innerHTML = '<h2>Latest events</h2><div class="card"><table>' +
+    o.events.map((e) => `<tr><td>${fmtDate(new Date(e.at).toISOString())} ${fmtTime(new Date(e.at).toISOString())}</td><td>${e.entity} #${e.entity_id}</td><td>${e.type}</td><td class="mute">${e.actor}</td></tr>`).join('') +
+    '</table></div>';
+}
+
+async function loadDrivers() {
+  try {
+    const o = await api('GET', '/api/admin/overview', null, H);
+    $('#drivers-list').innerHTML = '<div class="card"><table><thead><tr><th>ID</th><th>Name</th><th>Vehicle</th><th>Status</th><th></th></tr></thead><tbody>' +
+      o.drivers.map((d) => `<tr class="driver-row"><td>${d.id}</td><td>${d.name}</td><td>${d.vehicle}</td><td><span class="pill">${d.status}</span></td><td><button onclick="suspend(${d.id})">Suspend</button></td></tr>`).join('') +
+      '</tbody></table></div>';
+  } catch (e) { $('#drivers-list').innerHTML = `<p class="err">${e.message}</p>`; }
+}
+
+async function suspend(id) {
+  if (!confirm(`Suspend driver #${id}? They will be logged out immediately.`)) return;
+  try { await api('POST', `/api/admin/drivers/${id}/suspend`, {}, H); alert('Driver suspended.'); loadDrivers(); }
+  catch (e) { alert(e.message); }
+}
+
+async function loadNotifications() {
+  try {
+    const rows = await api('GET', '/api/admin/notifications', null, H);
+    if (!rows.length) { $('#notif-list').innerHTML = '<p class="mute">No notifications yet.</p>'; return; }
+    $('#notif-list').innerHTML = '<div class="card"><table><thead><tr><th>Time</th><th>To</th><th>Kind</th><th>Channel</th><th>Result</th></tr></thead><tbody>' +
+      rows.map((n) => `<tr><td>${fmtDate(new Date(n.at).toISOString())} ${fmtTime(new Date(n.at).toISOString())}</td><td>${n.address || n.ref || '—'}</td><td>${n.kind}</td><td>${n.channel}</td><td class="${n.ok ? 'notif-ok' : 'notif-fail'}">${n.ok ? 'sent' : (n.reason || 'failed')}</td></tr>`).join('') +
+      '</tbody></table></div>';
+  } catch (e) { $('#notif-list').innerHTML = `<p class="err">${e.message}</p>`; }
+}
+
+load();
+timer = setInterval(load, 10000);
+</script>
+</body>
+</html>
