@@ -135,6 +135,8 @@ function markPaid(db, region, orderId, amountCents) {
     L.payIn(db, region.id, o.id, o.account_id, o.cap_cents);
     const t = C.newToken();
     const upd = moveOrder(db, o, 'awaiting_confirmation', { token_hash: t.hash, token_expires: clock.now() + region.rules.confirmationExpiryDays * DAY }, 'payment', 'paid');
+    tell(db, upd, 'payment_received');
+    tell(db, upd, 'booking_confirmed');
     return { order: upd, confirmToken: t.token }; // token is texted to the recipient, never stored in clear
   });
 }
@@ -254,6 +256,7 @@ function acceptRun(db, region, runId, driverId) {
     if (view.bonusCents) L.bonus(db, region.id, driverId, view.bonusCents, runId);
     db.prepare("UPDATE drivers SET status='on_run' WHERE id=?").run(driverId);
     log(db, region.id, 'run', runId, 'accepted', `driver:${driverId}`, { payout: view.payoutCents, bonus: view.bonusCents, tier: view.tier });
+    for (const o of db.prepare('SELECT * FROM orders WHERE run_id=?').all(runId)) tell(db, o, 'driver_assigned');
     return { run: db.prepare('SELECT * FROM runs WHERE id=?').get(runId), view };
   });
 }
@@ -474,26 +477,25 @@ function previewQuoteLink(db, token) {
 }
 
 function redeemQuoteLink(db, region, token, pinBody) {
-  return tx(db, () => {
-    const row = db.prepare('SELECT * FROM quote_links WHERE token_hash=?').get(C.hash(token || ''));
-    if (!row) throw err(404, 'link not found');
-    if (row.expires_at < clock.now()) throw err(410, 'This delivery link has expired. Return to the store to choose delivery again.');
-    if (row.used_at) throw err(409, 'This link has already been used.');
-    const spec = JSON.parse(row.quote_json);
-    if (pinBody?.lat && pinBody?.lng) spec.drop = { ...spec.drop, lat: pinBody.lat, lng: pinBody.lng };
-    const orderResult = createOrder(db, region, { ...spec, accountId: row.store_id || null }, null);
-    const o = orderResult.order;
-    let confirmToken;
-    if (row.mode === 'wallet' && row.store_id) {
-      const r = walletPayOrder(db, region, o.id, row.store_id);
-      confirmToken = r.confirmToken;
-    } else {
-      const r = markPaid(db, region, o.id);
-      confirmToken = r.confirmToken;
-    }
-    db.prepare('UPDATE quote_links SET used_at=?, order_id=? WHERE id=?').run(clock.now(), o.id, row.id);
-    return { order: getOrder(db, o.id), confirmToken };
-  });
+  // Each sub-operation has its own transaction; we cannot nest them.
+  const row = db.prepare('SELECT * FROM quote_links WHERE token_hash=?').get(C.hash(token || ''));
+  if (!row) throw err(404, 'link not found');
+  if (row.expires_at < clock.now()) throw err(410, 'This delivery link has expired. Return to the store to choose delivery again.');
+  if (row.used_at) throw err(409, 'This link has already been used.');
+  const spec = JSON.parse(row.quote_json);
+  if (pinBody?.lat && pinBody?.lng) spec.drop = { ...spec.drop, lat: pinBody.lat, lng: pinBody.lng };
+  const orderResult = createOrder(db, region, { ...spec, accountId: row.store_id || null }, null);
+  const o = orderResult.order;
+  let confirmToken;
+  if (row.mode === 'wallet' && row.store_id) {
+    const r = walletPayOrder(db, region, o.id, row.store_id);
+    confirmToken = r.confirmToken;
+  } else {
+    const r = markPaid(db, region, o.id);
+    confirmToken = r.confirmToken;
+  }
+  db.prepare('UPDATE quote_links SET used_at=?, order_id=? WHERE id=?').run(clock.now(), o.id, row.id);
+  return { order: getOrder(db, o.id), confirmToken };
 }
 
 // ---------- driver earnings ----------

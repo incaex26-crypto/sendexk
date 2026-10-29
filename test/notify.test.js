@@ -34,10 +34,11 @@ test('all channels failing returns ok:false with attempts', () => {
 test('customer whatsapp goes out from the business number only; never the platform', () => {
   const db = fresh(); const to = { role: 'customer', phone: '083', businessId: 7 };
   let r = N.notify(db, { to, kind: 'delivered', data: { orderId: 1 } });
-  assert.equal(r.ok, false); // no business number and no email: platform number is never a fallback
+  // whatsapp fails (no business number), sms falls back and succeeds; platform never sends whatsapp
+  assert.equal(r.ok, true); assert.equal(r.channel, 'sms');
   assert.match(rows(db)[0].reason, /no verified whatsapp/);
   N.connectBusinessChannel(db, 7, 'whatsapp', '0115550000', false);
-  assert.equal(N.notify(db, { to, kind: 'delivered', data: { orderId: 1 } }).ok, false); // unverified
+  assert.equal(N.notify(db, { to, kind: 'delivered', data: { orderId: 1 } }).channel, 'sms'); // unverified whatsapp → sms fallback
   N.connectBusinessChannel(db, 7, 'whatsapp', '0115550000', true);
   r = N.notify(db, { to, kind: 'delivered', data: { orderId: 1 } });
   assert.equal(r.channel, 'whatsapp'); assert.equal(N.outbox.at(-1).from, '0115550000');
