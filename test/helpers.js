@@ -1,3 +1,4 @@
+process.env.DEV = '1'; // tests run like npm run dev, so fake-channel OTP codes are visible
 const { open } = require('../src/db');
 const S = require('../src/service');
 const clock = require('../src/clock');

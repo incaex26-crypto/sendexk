@@ -1,6 +1,7 @@
 // Admin accounts, sessions, OTP codes and rate limits. All state is in SQLite so limits survive restarts.
 const crypto = require('node:crypto');
 const clock = require('./clock');
+const N = require('./notify');
 
 const MIN = 60_000, HOUR = 60 * MIN;
 const SESSION_TTL = 8 * HOUR, OTP_TTL = 10 * MIN, MAX_CODE_TRIES = 5;
@@ -10,6 +11,7 @@ const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 const tooMany = (ms) => err(429, `Too many attempts. Try again in ${Math.max(1, Math.ceil(ms / MIN))} minutes.`);
 
 function initAuth(db) {
+  N.initNotify(db); // OTP codes are sent through notify, so its tables must exist too
   db.exec(`
 CREATE TABLE IF NOT EXISTS admin_users (id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created_at INTEGER);
 CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, kind TEXT NOT NULL, subject INTEGER NOT NULL, created_at INTEGER, expires_at INTEGER NOT NULL);
@@ -114,8 +116,10 @@ function requestOtp(db, phone, device) {
   if (driver) {
     db.prepare('DELETE FROM otp_codes WHERE phone=?').run(phone);
     db.prepare('INSERT INTO otp_codes (phone, code_hash, created_at, expires_at) VALUES (?,?,?,?)').run(phone, sha(phone + ':' + code), clock.now(), clock.now() + OTP_TTL);
+    N.notify(db, { to: { role: 'driver', id: driver.id, phone }, kind: 'otp_code', data: { code } });
   }
-  return { sent: true, devCode: process.env.NODE_ENV === 'production' ? undefined : code }; // real SMS provider replaces devCode
+  // Same reply either way; the code is shown only for fake channels on an npm run dev server.
+  return { sent: true, devCode: N.devCodesVisible() ? code : undefined };
 }
 
 function verifyOtp(db, phone, code) {
