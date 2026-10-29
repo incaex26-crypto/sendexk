@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Complete your delivery — SenDexk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>
+.sheet { height: 440px; }
+body { background: var(--bg); }
+</style>
+</head>
+<body>
+<div class="map-page">
+  <div id="map-canvas"></div>
+  <div class="map-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div id="loading" style="color:var(--mute);font-size:14px">Loading delivery details…</div>
+      <div id="content" style="display:none;display:flex;flex-direction:column;gap:12px">
+        <h1 style="font-size:20px">Confirm your drop-off</h1>
+        <!-- From store -->
+        <div class="row" style="gap:14px;align-items:flex-start">
+          <div class="dot-pickup" style="margin-left:4px;margin-top:4px"></div>
+          <div class="col">
+            <span class="label">Pickup</span>
+            <span style="font-size:15px;font-weight:700" id="pickup-addr">—</span>
+          </div>
+        </div>
+        <!-- Drop-off: user sets on map -->
+        <div class="row" style="gap:14px;align-items:flex-start">
+          <div class="dot-drop" style="margin-left:4px;margin-top:4px"></div>
+          <div class="col">
+            <span class="label">Your drop-off</span>
+            <span style="font-size:14px;font-weight:600;color:var(--mute)">Drag the pin on the map</span>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:14px"><span style="color:var(--mute);font-weight:600">Delivery fee</span><span style="font-weight:800" id="fee-label">—</span></div>
+        <p id="mode-note" style="margin:0;font-size:12px;color:var(--mute)"></p>
+      </div>
+      <div id="err-msg" class="err" style="display:none;margin-top:4px"></div>
+      <div id="expired-msg" style="display:none;color:var(--danger);font-size:14px;font-weight:600">This delivery link has expired. Return to the store to start again.</div>
+      <button class="btn btn-primary" id="pay-btn" style="margin-top:auto">Confirm delivery</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"></script>
+<script>
+let map, region, dropPin = null, spec = null;
+const token = new URLSearchParams(location.search).get('t');
+
+async function init() {
+  region = await fetch('/api/region').then(r => r.json());
+  if (!token) { show('expired'); return; }
+  try {
+    const data = await fetch('/api/store/pay/' + token).then(async r => { const j = await r.json(); if (!r.ok) throw new Error(j.error); return j; });
+    spec = data.spec;
+    document.getElementById('pickup-addr').textContent = spec.pickup && spec.pickup.address ? spec.pickup.address : '—';
+    document.getElementById('fee-label').textContent = fmtR(spec.cap_cents || spec.capCents || 0);
+    document.getElementById('mode-note').textContent = data.mode === 'wallet' ? 'Paid by the store.' : 'You are paying for this delivery.';
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'flex';
+    initMap();
+  } catch (e) {
+    if (e.message && e.message.includes('expired')) { show('expired'); return; }
+    document.getElementById('loading').textContent = e.message || 'Could not load delivery details.';
+  }
+}
+
+function show(what) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById(what + '-msg').style.display = 'block';
+  document.getElementById('pay-btn').disabled = true;
+}
+
+function initMap() {
+  if (!window.maplibregl || !window.pmtiles) return;
+  const protocol = new pmtiles.Protocol();
+  maplibregl.addProtocol('pmtiles', protocol.tile.bind(protocol));
+  const tilesUrl = region.map && region.map.tilesUrl ? region.map.tilesUrl : '/maps/jhb.pmtiles';
+  const center = spec && spec.drop ? [spec.drop.lng, spec.drop.lat] : [region.center.lng, region.center.lat];
+  dropPin = { lat: center[1], lng: center[0] };
+  map = new maplibregl.Map({
+    container: 'map-canvas',
+    style: { version: 8, sources: { pm: { type: 'vector', url: 'pmtiles://' + window.location.origin + tilesUrl } }, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#EAF0F5' } }, { id: 'earth', type: 'fill', source: 'pm', 'source-layer': 'earth', paint: { 'fill-color': '#EAF0F5' } }, { id: 'water', type: 'fill', source: 'pm', 'source-layer': 'water', paint: { 'fill-color': '#BDD8EC' } }, { id: 'road', type: 'line', source: 'pm', 'source-layer': 'roads', paint: { 'line-color': '#fff', 'line-width': 2 } }] },
+    center,
+    zoom: 14,
+  });
+  map.on('error', () => {});
+  // Draggable marker
+  const marker = new maplibregl.Marker({ color: '#2563E8', draggable: true }).setLngLat(center).addTo(map);
+  marker.on('dragend', () => { const ll = marker.getLngLat(); dropPin = { lat: ll.lat, lng: ll.lng }; });
+  // Pickup marker
+  if (spec && spec.pickup) new maplibregl.Marker({ color: '#0F1B2D' }).setLngLat([spec.pickup.lng, spec.pickup.lat]).addTo(map);
+}
+
+document.getElementById('pay-btn').onclick = async () => {
+  const btn = document.getElementById('pay-btn');
+  btn.disabled = true; btn.textContent = 'Confirming…';
+  document.getElementById('err-msg').style.display = 'none';
+  try {
+    const body = dropPin ? { lat: dropPin.lat, lng: dropPin.lng } : {};
+    const r = await fetch('/api/store/pay/' + token, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    window.location.href = 'confirm.html?t=' + j.confirmUrl.split('t=')[1];
+  } catch (e) {
+    const el = document.getElementById('err-msg');
+    el.textContent = e.message || 'Something went wrong. Please try again.';
+    el.style.display = 'block';
+    btn.disabled = false; btn.textContent = 'Confirm delivery';
+  }
+};
+
+function fmtR(c) { return 'R' + (c / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+
+init();
+</script>
+</body>
+</html>

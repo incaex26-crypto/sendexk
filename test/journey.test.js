@@ -8,6 +8,7 @@ const A = require('../src/auth');
 const N = require('../src/notify');
 const L = require('../src/ledger');
 const S = require('../src/service');
+const PAY = require('../src/payments');
 const clock = require('../src/clock');
 
 const HOUR = 3600000, MIN = 60000;
@@ -51,13 +52,34 @@ test('full ecosystem journey A→G', async () => {
     const or1 = await call('POST', '/api/orders', orderBody(), { 'idempotency-key': 'j-A1' });
     assert.equal(or1.order.status, 'awaiting_payment', 'A: order created');
 
-    const pay1 = await call('POST', `/api/orders/${or1.order.id}/pay`);
-    assert.equal(pay1.order.status, 'awaiting_confirmation', 'A: paid');
+    // Payment provider flow: create link → simulate webhook
+    PAY.resetAdapter(); // fresh adapter per test
+    const adapter = PAY.getAdapter();
+    const payLink = await call('POST', `/api/orders/${or1.order.id}/payment`);
+    assert.ok(payLink.payUrl, 'A: payment link returned');
+    assert.ok(payLink.ref, 'A: payment ref returned');
+    // Duplicate-safe: requesting again gives the same ref
+    const payLink2 = await call('POST', `/api/orders/${or1.order.id}/payment`);
+    assert.equal(payLink2.ref, payLink.ref, 'A: payment link is idempotent');
+    // Simulate provider webhook: POST { orderId, event, cents }
+    const whPayload = JSON.stringify({ orderId: or1.order.id, event: 'payment.complete', cents: or1.order.cap_cents });
+    const whR = await fetch(`http://127.0.0.1:${srv.address().port}/api/payment/webhook`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: whPayload,
+    });
+    const whJson = await whR.json();
+    assert.ok(whJson.ok, 'A: webhook accepted');
+    assert.ok(whJson.confirmUrl, 'A: confirmUrl in webhook response');
+    // Duplicate webhook: must not double-charge
+    const dupR = await fetch(`http://127.0.0.1:${srv.address().port}/api/payment/webhook`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: whPayload,
+    });
+    const dupJson = await dupR.json();
+    assert.ok(dupJson.ok && dupJson.duplicate, 'A: duplicate webhook is ignored');
+
     const notifAfterPay = N.outbox.filter((m) => m.kind === 'payment_received');
     assert.equal(notifAfterPay.length, 1, 'A: payment_received notification sent');
-    assert.ok(pay1.confirmUrl, 'A: confirmUrl returned');
 
-    const confToken = pay1.confirmUrl.split('t=')[1];
+    const confToken = whJson.confirmUrl.split('t=')[1];
     const conf1 = await call('POST', `/api/confirm/${confToken}`, { available: true, lat: P.rosebank.lat, lng: P.rosebank.lng });
     assert.equal(conf1.order.status, 'confirmed', 'A: recipient confirmed');
     assert.ok(conf1.deliveryCode, 'A: delivery code issued');
@@ -66,22 +88,39 @@ test('full ecosystem journey A→G', async () => {
     const extras = [];
     for (let i = 1; i <= 3; i++) {
       const o = await call('POST', '/api/orders', orderBody({ recipient: { name: `R${i}`, phone: `083111000${i}` }, drop: { lat: P.rosebank.lat + i * 0.003, lng: P.rosebank.lng, address: `Home ${i}` } }), { 'idempotency-key': `j-extra${i}` });
-      const p = await call('POST', `/api/orders/${o.order.id}/pay`);
-      const ct = p.confirmUrl.split('t=')[1];
+      // Use the payment link flow for extras too
+      await call('POST', `/api/orders/${o.order.id}/payment`);
+      const wb = JSON.stringify({ orderId: o.order.id, event: 'payment.complete', cents: o.order.cap_cents });
+      const wbR = await fetch(`http://127.0.0.1:${srv.address().port}/api/payment/webhook`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: wb,
+      });
+      const wbJ = await wbR.json();
+      const ct = wbJ.confirmUrl.split('t=')[1];
       const c = await call('POST', `/api/confirm/${ct}`, { available: true, lat: P.rosebank.lat + i * 0.003, lng: P.rosebank.lng });
       extras.push({ id: o.order.id, code: c.deliveryCode });
     }
 
     // ============================================================
-    // B. Business wallet: topup → wallet-pay order
+    // B. Business wallet: OTP login → topup → wallet-pay order
     // ============================================================
     const biz = S.createAccount(db, region, { kind: 'business', name: 'TechShop', phone: '0110000001', email: 'biz@x.co' });
-    const topupR = await call('POST', '/api/wallet/topup', { cents: 50000 }, { 'x-account-id': String(biz) });
+    // OTP login for business
+    const bizOtp = await call('POST', '/api/business/otp', { phone: '0110000001' });
+    assert.ok(bizOtp.devCode, 'B: business OTP visible in dev mode');
+    const bizVerifyR = await fetch(`http://127.0.0.1:${srv.address().port}/api/business/verify`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: '0110000001', code: bizOtp.devCode })
+    });
+    const bizCookieHdr = bizVerifyR.headers.get('set-cookie') || '';
+    const bizCookie = bizCookieHdr.split(';')[0];
+    assert.ok(bizCookie.includes('biz_session'), 'B: business session cookie issued');
+    const BH = { cookie: bizCookie };
+
+    const topupR = await call('POST', '/api/wallet/topup', { cents: 50000 }, BH);
     assert.equal(topupR.balanceCents, 50000, 'B: topup reflected');
     assert.equal(L.total(db), 0, 'B: ledger balanced after topup');
 
     const obiz = await call('POST', '/api/orders', orderBody({ accountId: biz, recipient: { name: 'BizSam', phone: '0832220000' } }), { 'idempotency-key': 'j-biz1' });
-    const walletPay = await call('POST', `/api/wallet/pay/${obiz.order.id}`, {}, { 'x-account-id': String(biz) });
+    const walletPay = await call('POST', `/api/wallet/pay/${obiz.order.id}`, {}, BH);
     assert.equal(walletPay.order.status, 'awaiting_confirmation', 'B: wallet-paid order');
     const bizBalance = S.walletBalance(db, biz);
     assert.ok(bizBalance < 50000, 'B: wallet debited');
@@ -91,10 +130,31 @@ test('full ecosystem journey A→G', async () => {
     assert.ok(stmt.length >= 2, 'B: statement has topup and payment rows');
     assert.equal(stmt[0].balanceCents, bizBalance, 'B: statement balance matches actual');
 
+    // Cross-business isolation: second business cannot read first business's wallet
+    const biz2 = S.createAccount(db, region, { kind: 'business', name: 'OtherShop', phone: '0120000002', email: 'other@x.co' });
+    const biz2Otp = await call('POST', '/api/business/otp', { phone: '0120000002' });
+    const biz2VerR = await fetch(`http://127.0.0.1:${srv.address().port}/api/business/verify`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: '0120000002', code: biz2Otp.devCode })
+    });
+    const biz2Cookie = (biz2VerR.headers.get('set-cookie') || '').split(';')[0];
+    const BH2 = { cookie: biz2Cookie };
+    // biz2 topup should only affect biz2's wallet
+    await call('POST', '/api/wallet/topup', { cents: 10000 }, BH2);
+    assert.equal(S.walletBalance(db, biz), bizBalance, 'B: cross-biz isolation: biz1 balance unchanged');
+    // biz2 cannot pay biz1's order
+    const biz1Order = await call('POST', '/api/orders', orderBody({ accountId: biz, recipient: { name: 'X', phone: '0833330001' } }), { 'idempotency-key': 'j-iso1' });
+    const isoErr = await call('POST', `/api/wallet/pay/${biz1Order.order.id}`, {}, BH2).catch((e) => e);
+    assert.ok(isoErr instanceof Error || isoErr.status, 'B: cross-biz isolation: cannot spend another business wallet');
+
     // ============================================================
     // C. Store checkout link: create → preview → redeem (shopper mode)
     // ============================================================
-    const linkR = await call('POST', '/api/store/quote', orderBody({ vehicleClass: 'car' }), { 'x-store-id': String(biz) });
+    // Store API key auth
+    const keyR = await call('POST', '/api/store/keys', { name: 'test-key' }, BH);
+    assert.ok(keyR.key, 'C: store API key issued');
+    const storeH = { 'x-api-key': keyR.key };
+
+    const linkR = await call('POST', '/api/store/quote', orderBody({ vehicleClass: 'car' }), storeH);
     assert.ok(linkR.token, 'C: quote link token issued');
     assert.ok(linkR.expiresAt > clock.now(), 'C: link not yet expired');
 
@@ -109,14 +169,9 @@ test('full ecosystem journey A→G', async () => {
     try { await call('POST', `/api/store/pay/${linkR.token}`, {}); assert.fail('C: should have thrown'); }
     catch (e) { assert.equal(e.status, 409, 'C: used link returns 409'); }
 
-    // Price ceiling: request a quote above the ceiling to verify rejection
-    const ceilBody = orderBody({ vehicleClass: 'van', weightKg: 400 });
-    try { await call('POST', '/api/store/quote', ceilBody, { 'x-store-id': '0' }); }
-    catch (e) { /* expected: van may be above ceiling or not, just check it doesn't crash */ }
-
     // Wallet mode: topup store → create wallet-mode link → redeem
-    await call('POST', '/api/wallet/topup', { cents: 200000 }, { 'x-account-id': String(biz) });
-    const walletLink = await call('POST', '/api/store/quote', { ...orderBody({ vehicleClass: 'car', recipient: { name: 'WalletSam', phone: '0833330000' } }), mode: 'wallet' }, { 'x-store-id': String(biz) });
+    await call('POST', '/api/wallet/topup', { cents: 200000 }, BH);
+    const walletLink = await call('POST', '/api/store/quote', { ...orderBody({ vehicleClass: 'car', recipient: { name: 'WalletSam', phone: '0833330000' } }), mode: 'wallet' }, storeH);
     const walletRedeem = await call('POST', `/api/store/pay/${walletLink.token}`, {});
     assert.equal(walletRedeem.order.status, 'awaiting_confirmation', 'C: wallet-mode link redeemed');
     assert.equal(L.total(db), 0, 'C: ledger balanced after wallet-mode redeem');

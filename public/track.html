@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Track delivery — SenDexk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>
+.sheet { height: 476px; }
+</style>
+</head>
+<body>
+<div class="map-page">
+  <div id="map-canvas"></div>
+  <div class="map-overlay">
+    <div class="status-bar">
+      <span id="status-text">Loading…</span>
+      <span style="color:var(--brand)" id="eta-text"></span>
+    </div>
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <!-- Driver card -->
+      <div class="driver-card" id="driver-card" style="display:none">
+        <div class="driver-avatar" id="driver-initial">T</div>
+        <div class="col flex1">
+          <span style="font-size:16px;font-weight:800" id="driver-name">—</span>
+          <span style="font-size:13px;font-weight:500;color:var(--mute)" id="driver-vehicle">—</span>
+        </div>
+        <a id="call-btn" href="#" aria-label="Call driver" style="width:44px;height:44px;border-radius:22px;border:1px solid var(--border);background:var(--sheet);color:var(--brand);display:flex;align-items:center;justify-content:center">
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>
+        </a>
+      </div>
+      <!-- Status steps -->
+      <div class="col" id="steps" style="gap:0"></div>
+      <!-- Delivery code -->
+      <div class="card" id="code-card" style="display:none">
+        <span style="font-size:13px;font-weight:600;color:var(--mute)">Delivery code. Share it with the driver when the parcel arrives.</span>
+        <div class="code-digits" style="margin-top:10px" id="code-digits"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"></script>
+<script>
+let map, region, orderId, pollTimer;
+const STATUS_LABELS = { awaiting_payment: 'Waiting for payment', awaiting_confirmation: 'Confirming drop-off', confirmed: 'Waiting for a driver', batched: 'Driver assigned', collected: 'Picked up', out_for_delivery: 'On the way', delivered: 'Delivered', failed: 'Could not be delivered' };
+
+async function init() {
+  region = await fetch('/api/region').then(r => r.json());
+  const params = new URLSearchParams(location.search);
+  orderId = params.get('order');
+  if (!orderId) { document.getElementById('status-text').textContent = 'No order found.'; return; }
+  await load();
+  pollTimer = setInterval(load, 8000);
+}
+
+async function load() {
+  try {
+    const data = await fetch('/api/orders/' + orderId + '/track').then(r => r.ok ? r.json() : null);
+    if (!data) return;
+    render(data);
+  } catch (e) { console.error(e); }
+}
+
+function render(data) {
+  const { order, driver, eta } = data;
+  const st = order.status;
+  document.getElementById('status-text').textContent = st === 'out_for_delivery' ? ('On the way to ' + (order.drop_name || 'you')) : (STATUS_LABELS[st] || st);
+  document.getElementById('eta-text').textContent = eta ? 'Arrives around ' + fmtTime(eta) : '';
+
+  // Driver card
+  if (driver) {
+    document.getElementById('driver-card').style.display = 'flex';
+    document.getElementById('driver-name').textContent = driver.name;
+    document.getElementById('driver-vehicle').textContent = driver.vehicle || '';
+    document.getElementById('driver-initial').textContent = (driver.name || 'D')[0].toUpperCase();
+  }
+
+  // Steps
+  const STEP_ORDER = ['awaiting_payment', 'awaiting_confirmation', 'confirmed', 'batched', 'collected', 'out_for_delivery', 'delivered'];
+  const curIdx = STEP_ORDER.indexOf(st);
+  const STEP_LABELS = { awaiting_payment: 'Paid', awaiting_confirmation: 'Drop-off confirmed', confirmed: 'Driver assigned', batched: 'Driver assigned', collected: 'Picked up from ' + (order.pickup_name || 'sender'), out_for_delivery: 'On the way to ' + (order.drop_name || 'you'), delivered: 'Delivered' };
+  const stepsEl = document.getElementById('steps');
+  stepsEl.innerHTML = '';
+  STEP_ORDER.slice(1).forEach((s, i) => {
+    const idx = i + 1;
+    const done = idx < curIdx;
+    const current = idx === curIdx;
+    const div = document.createElement('div');
+    div.className = 'step';
+    const dotCls = done ? 'done' : current ? 'current' : 'pending';
+    div.innerHTML = `<span class="step-dot ${dotCls}"></span><span class="flex1" style="font-size:${current ? 15 : 14}px;font-weight:${current ? 800 : 600};color:${current ? 'var(--ink)' : done ? 'var(--mute)' : 'var(--mute2)'}">${STEP_LABELS[s] || s}</span>${current ? '<span style="font-size:12px;color:var(--brand);font-weight:700">Now</span>' : ''}`;
+    stepsEl.appendChild(div);
+  });
+
+  // Delivery code (show only for awaiting_confirmation or confirmed)
+  const codeCard = document.getElementById('code-card');
+  if (['awaiting_confirmation', 'confirmed', 'batched', 'collected', 'out_for_delivery'].includes(st) && data.deliveryCode) {
+    codeCard.style.display = 'block';
+    const digits = document.getElementById('code-digits');
+    digits.innerHTML = '';
+    String(data.deliveryCode).padStart(4, '0').split('').forEach(d => {
+      const span = document.createElement('span');
+      span.className = 'code-digit';
+      span.textContent = d;
+      digits.appendChild(span);
+    });
+  } else { codeCard.style.display = 'none'; }
+
+  // Stop polling if delivered or failed
+  if (['delivered', 'failed'].includes(st) && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  updateMap(order, driver);
+}
+
+function updateMap(order, driver) {
+  if (!map || !window.maplibregl) return;
+  // Update driver marker if location available
+  if (driver && driver.lat && driver.lng) {
+    if (!map._driverMarker) {
+      const el = document.createElement('div');
+      el.style.cssText = 'width:20px;height:20px;border-radius:50%;background:#2563E8;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3)';
+      map._driverMarker = new maplibregl.Marker({ element: el }).setLngLat([driver.lng, driver.lat]).addTo(map);
+    } else { map._driverMarker.setLngLat([driver.lng, driver.lat]); }
+  }
+}
+
+async function initMap() {
+  if (!window.maplibregl || !window.pmtiles) return;
+  const protocol = new pmtiles.Protocol();
+  maplibregl.addProtocol('pmtiles', protocol.tile.bind(protocol));
+  const tilesUrl = region.map && region.map.tilesUrl ? region.map.tilesUrl : '/maps/jhb.pmtiles';
+  map = new maplibregl.Map({
+    container: 'map-canvas',
+    style: { version: 8, sources: { pm: { type: 'vector', url: 'pmtiles://' + window.location.origin + tilesUrl } }, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#EAF0F5' } }, { id: 'earth', type: 'fill', source: 'pm', 'source-layer': 'earth', paint: { 'fill-color': '#EAF0F5' } }, { id: 'water', type: 'fill', source: 'pm', 'source-layer': 'water', paint: { 'fill-color': '#BDD8EC' } }, { id: 'road', type: 'line', source: 'pm', 'source-layer': 'roads', paint: { 'line-color': '#fff', 'line-width': 2 } }] },
+    center: [region.center.lng, region.center.lat],
+    zoom: 12,
+  });
+  map.on('error', () => {});
+}
+
+function fmtTime(ms) { const d = new Date(ms); return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'); }
+
+(async () => { await init(); initMap(); })();
+</script>
+</body>
+</html>

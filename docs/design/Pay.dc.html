@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Confirm and pay</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{text-decoration:none}
+input::placeholder{color:#6B7A8C}
+</style>
+</helmet>
+<div style="position:relative;width:390px;height:844px;overflow:hidden;background:#FFFFFF;color:#0F1B2D;font-family:Manrope,sans-serif">
+  <div style="display:flex;align-items:center;gap:12px;padding:20px 16px 0">
+    <a href="Choose.dc.html" aria-label="Back" style="width:48px;height:48px;border-radius:24px;border:1px solid #D5DCE6;background:#F3F6FA;color:#0F1B2D;display:flex;align-items:center;justify-content:center">
+      <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+    </a>
+    <h1 style="margin:0;font-size:22px;font-weight:800">Confirm and pay</h1>
+  </div>
+
+  <div style="margin:16px 16px 0;padding:16px;border-radius:18px;border:1px solid #D5DCE6;background:#F3F6FA;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;gap:14px">
+      <div style="display:flex;flex-direction:column;align-items:center;padding-top:5px">
+        <div style="width:12px;height:12px;box-sizing:border-box;border-radius:6px;border:3px solid #2563E8;background:#FFFFFF"></div>
+        <div style="width:2px;height:30px;background:#C5CED9"></div>
+        <div style="width:12px;height:12px;border-radius:3px;background:#2563E8;color:#FFFFFF"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;flex-direction:column"><span style="font-size:12px;font-weight:600;color:#5B6B7F">Pickup</span><span style="font-size:15px;font-weight:700">Zinc Bakery, Rosebank</span></div>
+        <div style="display:flex;flex-direction:column"><span style="font-size:12px;font-weight:600;color:#5B6B7F">Drop-off</span><span style="font-size:15px;font-weight:700">Sam, Sandton</span></div>
+      </div>
+    </div>
+    <div style="height:1px;background:#E3E8EF"></div>
+    <div style="display:flex;justify-content:space-between;font-size:14px"><span style="color:#5B6B7F;font-weight:600">Vehicle</span><span style="font-weight:700">Car</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:14px"><span style="color:#5B6B7F;font-weight:600">Arrives</span><span style="font-weight:700">Now, by 15:10</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:14px"><span style="color:#5B6B7F;font-weight:600">Delivery fee</span><span style="font-weight:800">R52.00</span></div>
+  </div>
+
+  <div style="display:flex;gap:10px;margin:14px 16px 0">
+    <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+      <label for="rname" style="font-size:12px;font-weight:600;color:#5B6B7F">Recipient name</label>
+      <input id="rname" type="text" value="Sam" style="height:50px;box-sizing:border-box;padding:0 14px;border-radius:14px;border:1px solid #D5DCE6;background:#F3F6FA;color:#0F1B2D;font-family:Manrope,sans-serif;font-size:15px;font-weight:600">
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+      <label for="rphone" style="font-size:12px;font-weight:600;color:#5B6B7F">Recipient phone</label>
+      <input id="rphone" type="tel" placeholder="[Phone number]" style="height:50px;box-sizing:border-box;padding:0 14px;border-radius:14px;border:1px solid #D5DCE6;background:#F3F6FA;color:#0F1B2D;font-family:Manrope,sans-serif;font-size:15px;font-weight:600">
+    </div>
+  </div>
+
+  <div style="margin:18px 16px 0;display:flex;flex-direction:column;gap:8px">
+    <span style="font-size:14px;font-weight:800">Pay with</span>
+    <button type="button" onClick="{{pickWallet}}" style="{{walletStyle}}"><span style="{{walletDot}}"></span><span style="flex:1;display:flex;flex-direction:column;gap:1px"><span style="font-size:15px;font-weight:700">Business wallet</span><span style="font-size:12px;font-weight:500;color:#5B6B7F">Balance R1,240.00</span></span></button>
+    <button type="button" onClick="{{pickCard}}" style="{{cardStyle}}"><span style="{{cardDot}}"></span><span style="flex:1;font-size:15px;font-weight:700">Card</span></button>
+    <button type="button" onClick="{{pickEft}}" style="{{eftStyle}}"><span style="{{eftDot}}"></span><span style="flex:1;font-size:15px;font-weight:700">Instant EFT</span></button>
+  </div>
+
+  <div style="position:absolute;left:0;right:0;bottom:0;box-sizing:border-box;padding:14px 16px 20px;background:#FFFFFF;border-top:1px solid #D5DCE6;display:flex;flex-direction:column;gap:10px">
+    <p style="margin:0;font-size:12px;line-height:1.4;color:#5B6B7F">Sam gets a 4-digit code by message and gives it to the driver to confirm delivery.</p>
+    <a href="Track.dc.html" style="display:flex;align-items:center;justify-content:center;height:54px;border-radius:16px;background:#2563E8;font-size:17px;font-weight:800;color:#FFFFFF">Pay R52.00</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const s = this.state || {};
+    const m = s.m || 'wallet';
+    const row = (on) => 'display:flex;align-items:center;gap:12px;width:100%;box-sizing:border-box;min-height:56px;text-align:left;border-radius:14px;color:#0F1B2D;font-family:Manrope,sans-serif;cursor:pointer;' +
+      (on ? 'padding:0 13px;border:2px solid #2563E8;background:#E6F0FF;' : 'padding:0 14px;border:1px solid #D5DCE6;background:#F3F6FA;');
+    const dot = (on) => 'width:20px;height:20px;box-sizing:border-box;border-radius:10px;display:block;' +
+      (on ? 'border:6px solid #2563E8;background:#FFFFFF;' : 'border:2px solid #6B7A8C;background:transparent;');
+    return {
+      walletStyle: row(m === 'wallet'), cardStyle: row(m === 'card'), eftStyle: row(m === 'eft'),
+      walletDot: dot(m === 'wallet'), cardDot: dot(m === 'card'), eftDot: dot(m === 'eft'),
+      pickWallet: () => this.setState({ m: 'wallet' }),
+      pickCard: () => this.setState({ m: 'card' }),
+      pickEft: () => this.setState({ m: 'eft' })
+    };
+  }
+}
+</script>
+</body>
+</html>

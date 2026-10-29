@@ -1,134 +1,352 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Admin — SenDexk</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Operations — SenDexk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
 <style>
-.tabs{display:flex;gap:0;border-bottom:1px solid var(--line);margin:.8rem 0}
-.tab{padding:.45rem .9rem;cursor:pointer;border:none;background:none;color:var(--mute);border-bottom:2px solid transparent;font:inherit;font-size:.9rem}
-.tab.active{color:var(--brand);border-bottom-color:var(--brand)}
-.driver-row td:last-child button{padding:.2rem .6rem;margin:0;width:auto;font-size:.8rem;background:var(--danger)}
-.notif-ok{color:var(--ok)}.notif-fail{color:var(--danger)}
+body { margin:0; background:#FFFFFF; color:var(--ink); min-height:100dvh; display:flex; flex-direction:column; }
+.admin-wrap { display:flex; flex:1; min-height:0; }
+.nav-side { flex:0 0 220px; min-height:100dvh; background:var(--fill); border-right:1px solid #E3E8EF; padding:24px 16px; display:flex; flex-direction:column; gap:6px; }
+@media(max-width:680px) { .nav-side { display:none; } .nav-mobile { display:flex !important; } }
+.nav-mobile { display:none; border-bottom:1px solid #E3E8EF; background:var(--fill); padding:12px 16px; gap:8px; overflow-x:auto; }
+.nav-link { display:flex; align-items:center; height:44px; padding:0 12px; border-radius:12px; color:var(--mute); font-size:15px; font-weight:600; text-decoration:none; cursor:pointer; border:none; background:transparent; font-family:Manrope,sans-serif; }
+.nav-link.active { background:var(--selected); border:1px solid var(--border); color:var(--ink); font-weight:700; }
+.nav-link-mobile { height:36px; padding:0 12px; border-radius:18px; white-space:nowrap; font-size:14px; }
+.main-area { flex:1; min-width:0; padding:24px; display:flex; flex-direction:column; gap:18px; overflow-y:auto; }
+.stat-tile { flex:1 1 180px; padding:16px; border-radius:16px; border:1px solid var(--border); background:var(--fill); }
+.stat-tile.highlight { border-color:var(--brand); background:var(--selected); }
+.stat-num { font-size:34px; font-weight:800; margin-top:4px; }
+.map-container { border-radius:16px; border:1px solid var(--border); overflow:hidden; height:300px; background:var(--bg); }
+.trips-table { width:100%; min-width:560px; border-collapse:collapse; font-size:14px; }
+.trips-table th { text-align:left; color:var(--mute); padding:10px 8px; font-weight:600; }
+.trips-table td { padding:12px 8px; border-top:1px solid #E3E8EF; }
+.attention-card { padding:12px; border-radius:12px; border:1px solid #E3E8EF; background:#FFFFFF; font-size:14px; line-height:1.4; }
+.ledger-ok { color:#16a34a; font-weight:700; }
+.ledger-fail { color:var(--danger); font-weight:700; }
+#map-admin { width:100%; height:100%; }
 </style>
 </head>
 <body>
-<h1>Admin board</h1>
-<nav><a href="/">Book</a> <a href="/driver.html">Driver</a> <a href="/admin.html">Admin</a></nav>
-<div id="login" class="card" hidden>
-  <h2>Admin login</h2>
-  <input id="em" type="email" placeholder="Email" autocomplete="username">
-  <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
-  <button id="go">Log in</button>
-  <div id="lerr" class="err"></div>
-</div>
-<div id="board" hidden>
-  <div class="card row" style="flex-wrap:wrap;gap:6px">
-    <button id="out" class="alt" style="width:auto;padding:.4rem .8rem">Log out</button>
-    <button id="sweep" class="alt" style="width:auto;padding:.4rem .8rem">Roll unconfirmed</button>
-    <button id="hot" class="alt" style="width:auto;padding:.4rem .8rem">Refresh hotspots</button>
-    <button id="disp" style="width:auto;padding:.4rem .8rem">Dispatch</button>
-    <button id="pay" class="alt" style="width:auto;padding:.4rem .8rem">Run payouts</button>
-  </div>
-  <div class="tabs">
-    <button class="tab active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
-    <button class="tab" data-tab="drivers" onclick="switchTab('drivers')">Drivers</button>
-    <button class="tab" data-tab="notifications" onclick="switchTab('notifications')">Notifications</button>
-  </div>
-  <div id="tab-overview">
-    <div id="stats"></div>
-    <div id="mapbox"></div>
-    <div id="ev"></div>
-  </div>
-  <div id="tab-drivers" style="display:none">
-    <div id="drivers-list"><p class="mute">Loading…</p></div>
-  </div>
-  <div id="tab-notifications" style="display:none">
-    <div id="notif-list"><p class="mute">Loading…</p></div>
+
+<!-- Login screen -->
+<div id="scr-login" style="display:flex;align-items:center;justify-content:center;min-height:100dvh">
+  <div style="width:100%;max-width:380px;padding:32px 24px;border-radius:24px;border:1px solid var(--border)">
+    <h1 style="margin:0 0 6px;font-size:26px;font-weight:800">Operations sign in</h1>
+    <p style="color:var(--mute);font-size:14px;margin:0 0 24px">Admin accounts only.</p>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label for="em" style="font-size:12px;font-weight:600;color:var(--mute)">Email</label>
+        <input id="em" type="email" autocomplete="username" placeholder="admin@example.com" style="height:50px;border-radius:14px;border:1px solid var(--border);background:var(--fill);padding:0 14px;font-size:15px;font-family:Manrope,sans-serif">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label for="pw" style="font-size:12px;font-weight:600;color:var(--mute)">Password</label>
+        <input id="pw" type="password" autocomplete="current-password" style="height:50px;border-radius:14px;border:1px solid var(--border);background:var(--fill);padding:0 14px;font-size:15px;font-family:Manrope,sans-serif">
+      </div>
+      <button id="btn-login" class="btn btn-primary">Sign in</button>
+      <p id="lerr" style="color:var(--danger);font-size:14px;margin:0;text-align:center"></p>
+    </div>
   </div>
 </div>
 
+<!-- Admin board -->
+<div id="scr-board" style="display:none;flex:1">
+  <!-- Mobile nav bar -->
+  <nav class="nav-mobile" aria-label="Admin navigation">
+    <button class="nav-link nav-link-mobile active" data-section="overview" onclick="switchSection('overview')">Live trips</button>
+    <button class="nav-link nav-link-mobile" data-section="orders" onclick="switchSection('orders')">Orders</button>
+    <button class="nav-link nav-link-mobile" data-section="drivers" onclick="switchSection('drivers')">Drivers</button>
+    <button class="nav-link nav-link-mobile" data-section="money" onclick="switchSection('money')">Money</button>
+    <button class="nav-link nav-link-mobile" data-section="messages" onclick="switchSection('messages')">Messages</button>
+  </nav>
+
+  <div class="admin-wrap">
+    <!-- Sidebar nav -->
+    <nav class="nav-side" aria-label="Admin navigation">
+      <div style="font-size:20px;font-weight:800;padding:0 12px 18px">SenDexk</div>
+      <button class="nav-link active" data-section="overview" onclick="switchSection('overview')">Live trips</button>
+      <button class="nav-link" data-section="orders" onclick="switchSection('orders')">Orders</button>
+      <button class="nav-link" data-section="drivers" onclick="switchSection('drivers')">Drivers</button>
+      <button class="nav-link" data-section="businesses" onclick="switchSection('businesses')">Businesses</button>
+      <button class="nav-link" data-section="money" onclick="switchSection('money')">Money</button>
+      <button class="nav-link" data-section="messages" onclick="switchSection('messages')">Messages</button>
+      <div style="flex:1"></div>
+      <button id="btn-logout" class="nav-link" style="color:var(--danger)">Sign out</button>
+    </nav>
+
+    <!-- Main content -->
+    <main class="main-area">
+
+      <!-- Overview section -->
+      <div id="sec-overview">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px">
+          <div><h1 style="margin:0;font-size:26px;font-weight:800">Johannesburg North</h1><span style="font-size:14px;color:var(--mute)">Live view of today</span></div>
+        </div>
+
+        <!-- Stat tiles -->
+        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:6px">
+          <div class="stat-tile"><div style="font-size:13px;font-weight:600;color:var(--mute)">Trips in progress</div><div class="stat-num" id="stat-trips">—</div></div>
+          <div class="stat-tile"><div style="font-size:13px;font-weight:600;color:var(--mute)">Drivers online</div><div class="stat-num" id="stat-drivers">—</div></div>
+          <div class="stat-tile"><div style="font-size:13px;font-weight:600;color:var(--mute)">Orders today</div><div class="stat-num" id="stat-orders">—</div></div>
+          <div class="stat-tile highlight" id="stat-ledger-tile"><div style="font-size:13px;font-weight:600;color:var(--mute)">Payments check</div><div id="stat-ledger" style="font-size:20px;font-weight:800;margin-top:10px;color:#1D4ED8">Checking…</div></div>
+        </div>
+
+        <!-- Map + Attention -->
+        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:6px">
+          <section aria-label="Map" style="flex:2 1 360px;min-width:0">
+            <div class="map-container"><div id="map-admin"></div></div>
+          </section>
+          <section id="attention-section" aria-label="Needs attention" style="flex:1 1 260px;min-width:0;padding:16px;border-radius:16px;border:1px solid var(--border);background:var(--fill);display:flex;flex-direction:column;gap:12px">
+            <h2 style="margin:0;font-size:16px;font-weight:800">Needs attention</h2>
+            <p style="color:var(--mute);font-size:14px;margin:0">Loading…</p>
+          </section>
+        </div>
+
+        <!-- Live trips table -->
+        <section aria-label="Live trips" style="padding:16px;border-radius:16px;border:1px solid var(--border);background:var(--fill)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <h2 style="margin:0;font-size:16px;font-weight:800">Live trips</h2>
+            <div style="display:flex;gap:8px">
+              <button id="btn-dispatch" class="btn" style="height:36px;padding:0 14px;font-size:13px;background:var(--brand);color:#fff;border:0">Build trips</button>
+              <button id="btn-payouts" class="btn" style="height:36px;padding:0 14px;font-size:13px;background:transparent;border:1px solid var(--border);color:var(--ink)">Pay drivers</button>
+            </div>
+          </div>
+          <div style="overflow-x:auto"><table class="trips-table"><thead><tr><th>Trip</th><th>Driver</th><th>Stops</th><th>Status</th><th>Arrives</th></tr></thead><tbody id="trips-body"><tr><td colspan="5" style="color:var(--mute)">Loading…</td></tr></tbody></table></div>
+        </section>
+      </div>
+
+      <!-- Orders section -->
+      <div id="sec-orders" style="display:none">
+        <h1 style="margin:0 0 16px;font-size:24px;font-weight:800">Orders</h1>
+        <div id="orders-list"><p style="color:var(--mute)">Loading…</p></div>
+      </div>
+
+      <!-- Drivers section -->
+      <div id="sec-drivers" style="display:none">
+        <h1 style="margin:0 0 16px;font-size:24px;font-weight:800">Drivers</h1>
+        <div id="drivers-list"><p style="color:var(--mute)">Loading…</p></div>
+      </div>
+
+      <!-- Businesses section -->
+      <div id="sec-businesses" style="display:none">
+        <h1 style="margin:0 0 16px;font-size:24px;font-weight:800">Businesses</h1>
+        <p style="color:var(--mute)">Business listing coming soon.</p>
+      </div>
+
+      <!-- Money section -->
+      <div id="sec-money" style="display:none">
+        <h1 style="margin:0 0 16px;font-size:24px;font-weight:800">Money</h1>
+        <div id="money-content"><p style="color:var(--mute)">Loading…</p></div>
+      </div>
+
+      <!-- Messages section -->
+      <div id="sec-messages" style="display:none">
+        <h1 style="margin:0 0 16px;font-size:24px;font-weight:800">Messages</h1>
+        <div id="messages-list"><p style="color:var(--mute)">Loading…</p></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"></script>
 <script src="app.js"></script>
 <script>
-const H = {}; let region, map, timer;
+let adminMap, mapReady = false, protocolAdded = false, refreshTimer, region, currentSection = 'overview';
 
-function show(inn) { $('#login').hidden = inn; $('#board').hidden = !inn; }
-
-$('#go').onclick = async () => {
-  try { await api('POST', '/api/admin/login', { email: $('#em').value, password: $('#pw').value }); $('#pw').value = ''; $('#lerr').textContent = ''; load(); }
-  catch (e) { $('#lerr').textContent = e.message; }
-};
-$('#out').onclick = async () => { await api('POST', '/api/admin/logout', {}); show(false); };
-
-const act = (id, p) => $(id).onclick = async () => { try { await api('POST', p, {}, H); load(); } catch (e) { alert(e.message); } };
-act('#sweep', '/api/admin/sweep');
-act('#hot', '/api/admin/hotspots');
-act('#disp', '/api/admin/dispatch');
-act('#pay', '/api/admin/payouts');
-
-function switchTab(tab) {
-  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
-  $('#tab-overview').style.display = tab === 'overview' ? '' : 'none';
-  $('#tab-drivers').style.display = tab === 'drivers' ? '' : 'none';
-  $('#tab-notifications').style.display = tab === 'notifications' ? '' : 'none';
-  if (tab === 'drivers') loadDrivers();
-  if (tab === 'notifications') loadNotifications();
-}
-
-async function load() {
-  region = region || await api('GET', '/api/region');
-  let o;
-  try { o = await api('GET', '/api/admin/overview', null, H); } catch (e) { show(false); return; }
-  show(true);
-  const wallets = (o.money.wallets || []).filter((w) => w.bal > 0).map((w) => `<span class="pill">${w.account}: ${R(w.bal)}</span>`).join(' ');
-  $('#stats').innerHTML = `<div class="card">
-    <b>Orders</b> ${Object.entries(o.orders).map(([k, v]) => `<span class="pill">${k}: ${v}</span>`).join(' ') || 'none'}<br>
-    <b>Runs</b> ${Object.entries(o.runs).map(([k, v]) => `<span class="pill">${k}: ${v}</span>`).join(' ') || 'none'}
-    <div class="row" style="margin-top:.6rem">
-      <div><div class="mute">Platform revenue</div><div class="big">${R(o.money.revenue)}</div></div>
-      <div><div class="mute">In escrow</div><div class="big">${R(o.money.escrow)}</div></div>
-      <div><div class="mute">Driver payable</div><div class="big">${R(o.money.driverPayable)}</div></div>
-    </div>
-    ${wallets ? `<div style="margin-top:.4rem"><span class="mute">Wallets:</span> ${wallets}</div>` : ''}
-    <div class="${o.money.ledgerBalanced ? 'ok' : 'err'}">Ledger ${o.money.ledgerBalanced ? 'balanced' : 'NOT BALANCED'}</div>
-  </div>`;
-  const pins = [
-    ...o.hotspots.map((h) => ({ lat: h.lat, lng: h.lng, r: 6 + h.score * 2, color: '#e8590c', label: '🔥' + h.score })),
-    ...o.drivers.filter((d) => d.lat).map((d) => ({ lat: d.lat, lng: d.lng, r: 6, color: '#2563eb', label: d.name }))
-  ];
-  map = tileMap($('#mapbox'), region, { pins });
-  $('#ev').innerHTML = '<h2>Latest events</h2><div class="card"><table>' +
-    o.events.map((e) => `<tr><td>${fmtDate(new Date(e.at).toISOString())} ${fmtTime(new Date(e.at).toISOString())}</td><td>${e.entity} #${e.entity_id}</td><td>${e.type}</td><td class="mute">${e.actor}</td></tr>`).join('') +
-    '</table></div>';
-}
-
-async function loadDrivers() {
+document.getElementById('btn-login').onclick = async () => {
+  const btn = document.getElementById('btn-login');
+  btn.disabled = true;
+  document.getElementById('lerr').textContent = '';
   try {
-    const o = await api('GET', '/api/admin/overview', null, H);
-    $('#drivers-list').innerHTML = '<div class="card"><table><thead><tr><th>ID</th><th>Name</th><th>Vehicle</th><th>Status</th><th></th></tr></thead><tbody>' +
-      o.drivers.map((d) => `<tr class="driver-row"><td>${d.id}</td><td>${d.name}</td><td>${d.vehicle}</td><td><span class="pill">${d.status}</span></td><td><button onclick="suspend(${d.id})">Suspend</button></td></tr>`).join('') +
-      '</tbody></table></div>';
-  } catch (e) { $('#drivers-list').innerHTML = `<p class="err">${e.message}</p>`; }
+    await api('POST', '/api/admin/login', { email: document.getElementById('em').value, password: document.getElementById('pw').value });
+    document.getElementById('pw').value = '';
+    showBoard();
+  } catch (e) {
+    document.getElementById('lerr').textContent = e.message;
+    btn.disabled = false;
+  }
+};
+
+document.getElementById('btn-logout').onclick = async () => {
+  clearInterval(refreshTimer);
+  await api('POST', '/api/admin/logout', {}).catch(() => {});
+  document.getElementById('scr-board').style.display = 'none';
+  document.getElementById('scr-login').style.display = 'flex';
+};
+
+document.getElementById('btn-dispatch').onclick = async () => {
+  try { await api('POST', '/api/admin/dispatch', {}); await refresh(); }
+  catch (e) { alert(e.message); }
+};
+
+document.getElementById('btn-payouts').onclick = async () => {
+  try { await api('POST', '/api/admin/payouts', {}); alert('Driver payments queued.'); }
+  catch (e) { alert(e.message); }
+};
+
+function showBoard() {
+  document.getElementById('scr-login').style.display = 'none';
+  document.getElementById('scr-board').style.display = 'flex';
+  region = region || api('GET', '/api/region').then(r => { region = r; initAdminMap(); });
+  refresh();
+  refreshTimer = setInterval(refresh, 10000);
 }
 
-async function suspend(id) {
-  if (!confirm(`Suspend driver #${id}? They will be logged out immediately.`)) return;
-  try { await api('POST', `/api/admin/drivers/${id}/suspend`, {}, H); alert('Driver suspended.'); loadDrivers(); }
+async function refresh() {
+  try {
+    const o = await api('GET', '/api/admin/overview');
+    updateStats(o);
+    updateTripsTable(o);
+    updateAttention(o);
+    if (currentSection === 'drivers') renderDrivers(o.drivers);
+    if (currentSection === 'money') renderMoney(o.money);
+    if (currentSection === 'messages') loadMessages();
+    updateMapPins(o);
+  } catch (e) {
+    if (e.status === 401) { clearInterval(refreshTimer); showBoard(); }
+  }
+}
+
+function updateStats(o) {
+  const runEntries = Object.entries(o.runs || {});
+  const activeRuns = runEntries.filter(([k]) => k !== 'done' && k !== 'released').reduce((a, [, v]) => a + v, 0);
+  document.getElementById('stat-trips').textContent = activeRuns;
+  document.getElementById('stat-drivers').textContent = (o.drivers || []).filter(d => d.lat).length;
+  const totalOrders = Object.values(o.orders || {}).reduce((a, v) => a + v, 0);
+  document.getElementById('stat-orders').textContent = totalOrders;
+  const ok = o.money && o.money.ledgerBalanced;
+  document.getElementById('stat-ledger').textContent = ok ? 'All figures match' : 'MISMATCH — check now';
+  document.getElementById('stat-ledger').className = ok ? 'ledger-ok' : 'ledger-fail';
+  document.getElementById('stat-ledger-tile').style.borderColor = ok ? 'var(--brand)' : 'var(--danger)';
+  document.getElementById('stat-ledger-tile').style.background = ok ? 'var(--selected)' : '#FEF2F2';
+}
+
+function updateTripsTable(o) {
+  const runs = o.runs || {};
+  const events = o.events || [];
+  const tbody = document.getElementById('trips-body');
+  // Show recent events as a proxy for live trips
+  if (!events.length) { tbody.innerHTML = '<tr><td colspan="5" style="color:var(--mute)">No activity yet.</td></tr>'; return; }
+  tbody.innerHTML = events.slice(0, 10).map(e => `<tr>
+    <td style="font-weight:700">#${e.entity_id}</td>
+    <td>${e.actor || '—'}</td>
+    <td>—</td>
+    <td>${e.type}</td>
+    <td>${fmtTime(e.at)}</td>
+  </tr>`).join('');
+}
+
+function fmtTime(ts) { try { return new Date(ts).toLocaleTimeString('en-ZA', { hour:'2-digit', minute:'2-digit' }); } catch { return '—'; } }
+
+function updateAttention(o) {
+  const items = [];
+  // Wallets below threshold
+  (o.money && o.money.wallets || []).forEach(w => { if (w.bal < 10000) items.push(`<b>Wallet low</b><br><span style="color:var(--mute)">${w.account} has R${(w.bal/100).toFixed(2)} left.</span>`); });
+  // Ledger mismatch
+  if (o.money && !o.money.ledgerBalanced) items.push(`<b>Ledger does not balance</b><br><span style="color:var(--mute)">Check the Money tab.</span>`);
+  const sec = document.getElementById('attention-section');
+  if (!items.length) { sec.innerHTML = '<h2 style="margin:0;font-size:16px;font-weight:800">Needs attention</h2><p style="color:var(--mute);font-size:14px;margin:0">All good.</p>'; return; }
+  sec.innerHTML = '<h2 style="margin:0 0 12px;font-size:16px;font-weight:800">Needs attention</h2>' + items.map(i => `<div class="attention-card">${i}</div>`).join('');
+}
+
+function updateMapPins(o) {
+  if (!adminMap || !mapReady) return;
+  // Remove existing markers and re-add
+}
+
+function renderDrivers(drivers) {
+  const list = document.getElementById('drivers-list');
+  if (!drivers || !drivers.length) { list.innerHTML = '<p style="color:var(--mute)">No drivers yet.</p>'; return; }
+  list.innerHTML = '<div style="overflow-x:auto"><table class="trips-table"><thead><tr><th>Name</th><th>Vehicle</th><th>Status</th><th></th></tr></thead><tbody>' +
+    drivers.map(d => `<tr>
+      <td style="font-weight:700">${d.name}</td>
+      <td>${d.vehicle}</td>
+      <td><span style="padding:4px 10px;border-radius:12px;background:var(--fill);border:1px solid var(--border);font-size:12px;font-weight:600">${d.status}</span></td>
+      <td><button onclick="suspendDriver(${d.id})" style="padding:4px 12px;border-radius:8px;border:1px solid var(--danger);background:transparent;color:var(--danger);font-size:13px;cursor:pointer;font-family:Manrope,sans-serif">Suspend</button></td>
+    </tr>`).join('') + '</tbody></table></div>';
+}
+
+async function suspendDriver(id) {
+  if (!confirm('Suspend this driver? They will be signed out immediately.')) return;
+  try { await api('POST', `/api/admin/drivers/${id}/suspend`, {}); refresh(); }
   catch (e) { alert(e.message); }
 }
 
-async function loadNotifications() {
-  try {
-    const rows = await api('GET', '/api/admin/notifications', null, H);
-    if (!rows.length) { $('#notif-list').innerHTML = '<p class="mute">No notifications yet.</p>'; return; }
-    $('#notif-list').innerHTML = '<div class="card"><table><thead><tr><th>Time</th><th>To</th><th>Kind</th><th>Channel</th><th>Result</th></tr></thead><tbody>' +
-      rows.map((n) => `<tr><td>${fmtDate(new Date(n.at).toISOString())} ${fmtTime(new Date(n.at).toISOString())}</td><td>${n.address || n.ref || '—'}</td><td>${n.kind}</td><td>${n.channel}</td><td class="${n.ok ? 'notif-ok' : 'notif-fail'}">${n.ok ? 'sent' : (n.reason || 'failed')}</td></tr>`).join('') +
-      '</tbody></table></div>';
-  } catch (e) { $('#notif-list').innerHTML = `<p class="err">${e.message}</p>`; }
+function renderMoney(money) {
+  if (!money) return;
+  const el = document.getElementById('money-content');
+  el.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+      <div class="stat-tile"><div style="font-size:13px;font-weight:600;color:var(--mute)">Platform revenue</div><div class="stat-num">${fmtR(money.revenue)}</div></div>
+      <div class="stat-tile"><div style="font-size:13px;font-weight:600;color:var(--mute)">Held in trust</div><div class="stat-num">${fmtR(Math.abs(money.escrow))}</div></div>
+      <div class="stat-tile"><div style="font-size:13px;font-weight:600;color:var(--mute)">Driver payable</div><div class="stat-num">${fmtR(money.driverPayable)}</div></div>
+    </div>
+    <div style="padding:16px;border-radius:16px;border:1px solid var(--border);background:var(--fill)">
+      <div class="${money.ledgerBalanced ? 'ledger-ok' : 'ledger-fail'}" style="font-size:16px;margin-bottom:8px">Ledger ${money.ledgerBalanced ? 'balances to zero' : 'DOES NOT BALANCE'}</div>
+      ${(money.wallets || []).map(w => `<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #E3E8EF;font-size:14px"><span style="color:var(--mute)">${w.account}</span><span style="font-weight:700">${fmtR(w.bal)}</span></div>`).join('')}
+    </div>`;
 }
 
-load();
-timer = setInterval(load, 10000);
+async function loadMessages() {
+  try {
+    const rows = await api('GET', '/api/admin/notifications');
+    const el = document.getElementById('messages-list');
+    if (!rows.length) { el.innerHTML = '<p style="color:var(--mute)">No messages yet.</p>'; return; }
+    el.innerHTML = '<div style="overflow-x:auto"><table class="trips-table"><thead><tr><th>Time</th><th>To</th><th>Type</th><th>Channel</th><th>Result</th></tr></thead><tbody>' +
+      rows.map(n => `<tr>
+        <td>${fmtTime(n.at)}</td>
+        <td>${n.address || n.ref || '—'}</td>
+        <td>${n.kind}</td>
+        <td>${n.channel}</td>
+        <td style="color:${n.ok ? '#16a34a' : 'var(--danger)'};font-weight:600">${n.ok ? 'Sent' : (n.reason || 'Failed')}</td>
+      </tr>`).join('') + '</tbody></table></div>';
+  } catch (e) { document.getElementById('messages-list').innerHTML = `<p style="color:var(--danger)">${e.message}</p>`; }
+}
+
+function switchSection(name) {
+  currentSection = name;
+  ['overview','orders','drivers','businesses','money','messages'].forEach(s => {
+    document.getElementById('sec-' + s).style.display = s === name ? '' : 'none';
+  });
+  document.querySelectorAll('.nav-link[data-section]').forEach(l => l.classList.toggle('active', l.dataset.section === name));
+  if (name === 'drivers') { api('GET', '/api/admin/overview').then(o => renderDrivers(o.drivers)).catch(() => {}); }
+  if (name === 'money') { api('GET', '/api/admin/overview').then(o => renderMoney(o.money)).catch(() => {}); }
+  if (name === 'messages') loadMessages();
+}
+
+function initAdminMap() {
+  if (!window.maplibregl || !window.pmtiles || !region) return;
+  if (!protocolAdded) {
+    const protocol = new pmtiles.Protocol();
+    maplibregl.addProtocol('pmtiles', protocol.tile.bind(protocol));
+    protocolAdded = true;
+  }
+  const tilesUrl = region.map && region.map.tilesUrl ? region.map.tilesUrl : '/maps/jhb.pmtiles';
+  adminMap = new maplibregl.Map({
+    container: 'map-admin',
+    style: { version: 8, sources: { pm: { type: 'vector', url: 'pmtiles://' + window.location.origin + tilesUrl } }, layers: [
+      { id: 'bg', type: 'background', paint: { 'background-color': '#EAF0F5' } },
+      { id: 'earth', type: 'fill', source: 'pm', 'source-layer': 'earth', paint: { 'fill-color': '#EAF0F5' } },
+      { id: 'water', type: 'fill', source: 'pm', 'source-layer': 'water', paint: { 'fill-color': '#BDD8EC' } },
+      { id: 'roads', type: 'line', source: 'pm', 'source-layer': 'roads', paint: { 'line-color': '#FFFFFF', 'line-width': 2 } },
+    ] },
+    center: [region.center.lng, region.center.lat], zoom: 12,
+  });
+  adminMap.on('load', () => { mapReady = true; });
+  adminMap.on('error', () => {});
+}
+
+function fmtR(c) { return 'R' + ((c || 0) / 100).toFixed(2); }
+
+// Try auto-load (cookie-based auth)
+api('GET', '/api/admin/overview').then(o => { showBoard(); }).catch(() => {
+  document.getElementById('scr-login').style.display = 'flex';
+});
 </script>
 </body>
 </html>

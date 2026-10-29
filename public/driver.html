@@ -1,164 +1,399 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Driver — SenDexk</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Driver — SenDexk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
 <style>
-.tabs{display:flex;gap:0;border-bottom:1px solid var(--line);margin-bottom:12px}
-.tab{padding:.5rem 1rem;cursor:pointer;border:none;background:none;color:var(--mute);border-bottom:2px solid transparent;font:inherit}
-.tab.active{color:var(--brand);border-bottom-color:var(--brand)}
-.earn-row td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.stop-row { display:flex; align-items:center; gap:12px; }
+.stop-num { width:26px; height:26px; border-radius:13px; font-size:13px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.stop-num.pickup { background:#FFFFFF; border:1.5px solid #D5DCE6; color:var(--ink); }
+.stop-num.drop { background:var(--brand); color:#FFFFFF; }
+.code-input { display:flex; gap:8px; }
+.code-input input { flex:1; height:56px; border-radius:12px; border:2px solid var(--border); background:var(--fill); font-size:26px; font-weight:800; text-align:center; font-family:Manrope,sans-serif; color:var(--ink); }
+.code-input input:focus { border-color:var(--brand); outline:none; }
 </style>
-</head><body>
-<h1>Driver</h1><nav><a href="/">Book</a> <a href="/driver.html">Driver</a> <a href="/admin.html">Admin</a></nav>
-<div class="card"><label>Driver ID (starter — use phone OTP on next release)</label><div class="row"><input id="did" type="number" value="1"><button id="go">Open</button></div></div>
-<div class="tabs">
-  <button class="tab active" data-tab="runs" onclick="switchTab('runs')">Runs</button>
-  <button class="tab" data-tab="earnings" onclick="switchTab('earnings')">Earnings</button>
-</div>
-<div id="tab-runs">
-<div id="run-map" style="width:100%;height:320px;display:none;border-radius:8px;overflow:hidden;margin:1rem 0;position:relative"></div>
-<div id="me"></div><div id="runs"></div>
-</div>
-<div id="tab-earnings" style="display:none">
-<div id="earn-content"><p class="mute">Open your driver profile first.</p></div>
+</head>
+<body style="background:var(--bg);margin:0;font-family:Manrope,sans-serif;color:var(--ink)">
+
+<!-- Login screen -->
+<div id="scr-login" class="map-page" style="display:flex;align-items:center;justify-content:center;min-height:100dvh">
+  <div style="width:100%;max-width:420px;padding:24px 16px">
+    <h1 style="font-size:28px;margin:0 0 4px">Driver sign in</h1>
+    <p style="color:var(--mute);font-size:14px;margin:0 0 24px">We'll send a code to your phone.</p>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label for="login-phone" style="font-size:12px;font-weight:600;color:var(--mute)">Phone number</label>
+        <input id="login-phone" type="tel" placeholder="0820000000" style="height:50px;border-radius:14px;border:1px solid var(--border);background:var(--fill);padding:0 14px;font-size:15px;font-weight:600;font-family:Manrope,sans-serif;color:var(--ink)">
+      </div>
+      <button id="btn-send-otp" class="btn btn-primary">Send code</button>
+      <div id="otp-step" style="display:none;flex-direction:column;gap:12px">
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <label for="login-code" style="font-size:12px;font-weight:600;color:var(--mute)">6-digit code</label>
+          <input id="login-code" type="text" inputmode="numeric" maxlength="6" placeholder="123456" style="height:50px;border-radius:14px;border:1px solid var(--border);background:var(--fill);padding:0 14px;font-size:22px;font-weight:800;text-align:center;font-family:Manrope,sans-serif;color:var(--ink)">
+        </div>
+        <button id="btn-verify" class="btn btn-primary">Sign in</button>
+      </div>
+      <p id="login-msg" style="color:var(--mute);font-size:14px;margin:0;text-align:center"></p>
+    </div>
+  </div>
 </div>
 
-<script src="app.js"></script>
+<!-- Main driver screen: map + bottom sheet -->
+<div id="scr-main" class="map-page" style="display:none">
+  <div id="map-canvas"></div>
+  <div class="map-overlay">
+    <!-- Top pills -->
+    <div id="status-pill" style="position:absolute;left:16px;top:20px;height:48px;padding:0 16px;border-radius:24px;border:1px solid var(--border);background:var(--sheet);display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700">
+      <span id="online-dot" style="width:10px;height:10px;border-radius:5px;background:var(--brand)"></span>
+      <span id="status-label">Online</span>
+    </div>
+    <div id="earnings-pill" style="position:absolute;right:16px;top:20px;height:48px;padding:0 16px;border-radius:24px;border:1px solid var(--border);background:var(--sheet);display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700">
+      <span style="color:var(--mute);font-weight:600">Today</span>
+      <span id="today-earn">R0.00</span>
+    </div>
+
+    <div class="sheet" id="sheet" style="min-height:280px;max-height:80dvh;overflow-y:auto">
+      <div class="sheet-handle"></div>
+
+      <!-- Waiting for trip -->
+      <div id="pane-waiting" style="display:flex;flex-direction:column;gap:14px">
+        <h2 style="margin:0;font-size:20px;font-weight:800">Waiting for a trip</h2>
+        <p id="wait-note" style="margin:0;font-size:14px;color:var(--mute)">You'll be notified when there's a trip nearby. Keep this page open.</p>
+        <button id="btn-logout" class="btn" style="background:transparent;border:1px solid var(--border);color:var(--ink);font-size:14px;font-weight:600;height:44px">Sign out</button>
+      </div>
+
+      <!-- Trip offered -->
+      <div id="pane-offer" style="display:none;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:flex-end;justify-content:space-between">
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <span style="font-size:13px;font-weight:600;color:var(--mute)">New trip · you earn</span>
+            <span id="offer-earn" style="font-size:40px;line-height:1;font-weight:800">R0.00</span>
+          </div>
+          <div style="text-align:right;display:flex;flex-direction:column;gap:2px">
+            <span id="offer-km" style="font-size:15px;font-weight:800">—</span>
+            <span id="offer-min" style="font-size:13px;font-weight:600;color:var(--mute)">—</span>
+          </div>
+        </div>
+        <div id="offer-stops" style="display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:16px;border:1px solid var(--border);background:var(--fill)"></div>
+        <p style="margin:0;font-size:12px;line-height:1.4;color:var(--mute)">You see exactly what you will earn before you accept.</p>
+        <div style="display:flex;gap:10px;margin-top:auto">
+          <button id="btn-decline" class="btn" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--ink);font-size:16px;font-weight:700">Decline</button>
+          <button id="btn-accept" class="btn btn-primary" style="flex:2">Accept trip</button>
+        </div>
+      </div>
+
+      <!-- Active trip: going to stop -->
+      <div id="pane-active" style="display:none;flex-direction:column;gap:14px">
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <span id="active-earn" style="font-size:13px;font-weight:700;color:var(--brand)">Trip accepted</span>
+          <span id="active-heading" style="font-size:22px;line-height:1.2;font-weight:800"></span>
+          <span id="active-sub" style="font-size:14px;font-weight:600;color:var(--mute)"></span>
+        </div>
+        <div id="active-instruction" style="padding:14px;border-radius:16px;border:1px solid var(--border);background:var(--fill);font-size:14px;line-height:1.5;color:var(--mute)"></div>
+        <div id="active-code-section" style="display:none;flex-direction:column;gap:10px">
+          <span style="font-size:13px;font-weight:600;color:var(--mute)">Ask the recipient for their 4-digit code</span>
+          <div class="code-input"><input id="code-0" type="text" inputmode="numeric" maxlength="1"><input id="code-1" type="text" inputmode="numeric" maxlength="1"><input id="code-2" type="text" inputmode="numeric" maxlength="1"><input id="code-3" type="text" inputmode="numeric" maxlength="1"></div>
+        </div>
+        <button id="btn-action" class="btn btn-primary">Picked up</button>
+        <button id="btn-fail" class="btn" style="display:none;background:transparent;border:1px solid var(--border);color:var(--ink);font-size:14px">Could not deliver</button>
+        <p id="active-err" style="display:none;color:var(--danger);font-size:14px;margin:0"></p>
+      </div>
+
+      <!-- Earnings tab -->
+      <div id="pane-earnings" style="display:none;flex-direction:column;gap:14px">
+        <h2 style="margin:0;font-size:20px;font-weight:800">Earnings</h2>
+        <div id="earn-available" style="padding:16px;border-radius:16px;border:1px solid var(--border);background:var(--fill);display:flex;flex-direction:column;gap:4px">
+          <span style="font-size:13px;font-weight:600;color:var(--mute)">Available</span>
+          <span id="earn-payable" style="font-size:34px;font-weight:800">R0.00</span>
+        </div>
+        <div id="earn-table"></div>
+        <button id="btn-show-waiting" class="btn" style="background:transparent;border:1px solid var(--border);color:var(--ink);font-size:14px;font-weight:600;height:44px">Back</button>
+      </div>
+    </div>
+
+    <button id="btn-earnings-toggle" style="position:absolute;bottom:16px;right:16px;width:48px;height:48px;border-radius:24px;border:1px solid var(--border);background:var(--sheet);display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(15,27,45,.12)" aria-label="Earnings">
+      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+    </button>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"></script>
+<script src="app.js"></script>
 <script>
-let H={}, _region=null, _map=null, _protocolAdded=false;
+let driverToken = null, driverInfo = null, currentRun = null, currentParcels = [], currentParcelIdx = 0;
+let map, region, protocolAdded = false, pollTimer = null;
 
-async function fetchRegion(){if(!_region)_region=await api('GET','/api/region');return _region;}
+// Auto-login from storage
+const saved = sessionStorage.getItem('driver_token');
+if (saved) { driverToken = saved; startMain(); }
+else { document.getElementById('scr-login').style.display = 'flex'; }
 
-$('#go').onclick=load;
+// OTP login
+document.getElementById('btn-send-otp').onclick = async () => {
+  const phone = document.getElementById('login-phone').value.trim();
+  if (!phone) return;
+  setMsg('Sending…');
+  try {
+    await api('POST', '/api/driver/otp', { phone });
+    document.getElementById('otp-step').style.display = 'flex';
+    setMsg('Code sent. Check your phone.');
+  } catch (e) { setMsg(e.message); }
+};
 
-async function load(){
-  H={'x-driver-id':$('#did').value};
-  try{
-    const [m, region]=await Promise.all([api('GET','/api/driver/me',null,H), fetchRegion()]);
-    $('#me').innerHTML=`<div class="card"><b>${m.driver.name}</b> <span class=pill>${m.driver.vehicle}</span> <span class=pill>${m.driver.tier}</span>
-${m.driver.tier==='standard'?'<button id="pro" class="alt">Get Pro for 30 days (lower platform share)</button>':''}
-<button id="pin" class="alt">Send my location now</button></div>`;
-    $('#pro')&&($('#pro').onclick=async()=>{await api('POST','/api/driver/pro',{},H);load()});
-    $('#pin').onclick=()=>navigator.geolocation?.getCurrentPosition(p=>api('POST','/api/driver/ping',{lat:p.coords.latitude,lng:p.coords.longitude},H).then(()=>alert('Sent')));
-    if(m.run){
-      $('#runs').innerHTML=`<h2>Your run #${m.run.id} · ${R(m.run.payoutCents)}</h2>`+m.parcels.map(p=>`<div class="card"><b>#${p.id}</b> ${p.pickup_name} → ${p.drop_name} <span class=pill>${p.status}</span><div class=mute>${p.drop_addr||''}</div><div id="a${p.id}"></div></div>`).join('');
-      m.parcels.forEach(p=>actions(p));
-      showRunMap(m.parcels, region);
+document.getElementById('btn-verify').onclick = async () => {
+  const phone = document.getElementById('login-phone').value.trim();
+  const code = document.getElementById('login-code').value.trim();
+  setMsg('Checking…');
+  try {
+    const r = await api('POST', '/api/driver/verify', { phone, code });
+    driverToken = r.token;
+    sessionStorage.setItem('driver_token', r.token);
+    document.getElementById('scr-login').style.display = 'none';
+    startMain();
+  } catch (e) { setMsg(e.message); }
+};
+
+function setMsg(t) { document.getElementById('login-msg').textContent = t; }
+
+async function startMain() {
+  document.getElementById('scr-main').style.display = 'block';
+  try {
+    region = await api('GET', '/api/region');
+    initMap();
+    await refresh();
+    pollTimer = setInterval(refresh, 10000);
+  } catch (e) {
+    // token expired
+    sessionStorage.removeItem('driver_token');
+    location.reload();
+  }
+}
+
+function dH() { return { 'authorization': 'Bearer ' + driverToken }; }
+
+async function refresh() {
+  try {
+    const m = await api('GET', '/api/driver/me', null, dH());
+    driverInfo = m.driver;
+    // Update earnings pill
+    const e = await api('GET', '/api/driver/earnings', null, dH()).catch(() => ({ payableCents: 0, runs: [] }));
+    // Calculate today's earnings from runs (simplified)
+    const todayPay = (m.run && m.run.payoutCents) ? m.run.payoutCents : (e.runs && e.runs[0] ? e.runs[0].payout_cents : 0);
+    document.getElementById('today-earn').textContent = fmtR(e.payableCents || 0);
+
+    if (m.run) {
+      currentRun = m.run;
+      currentParcels = m.parcels || [];
+      showActiveTrip();
     } else {
-      hideMap();
-      const rs=await api('GET','/api/driver/runs',null,H);
-      $('#runs').innerHTML='<h2>Open runs</h2>'+(rs.length?rs.map(r=>`<div class="card"><div class=big>${R(r.payoutCents)}</div>${r.parcels} parcels · ${r.km} km · ~${r.minutes} min${r.bonusCents?` <span class=pill>incl. ${R(r.bonusCents)} hotspot bonus</span>`:''}<button data-r="${r.id}">Accept</button></div>`).join(''):'<p class=mute>No runs right now.</p>');
-      document.querySelectorAll('[data-r]').forEach(b=>b.onclick=async()=>{try{await api('POST',`/api/driver/runs/${b.dataset.r}/accept`,{},H);load()}catch(e){alert(e.message);load()}});
+      currentRun = null;
+      // Check for open runs
+      const runs = await api('GET', '/api/driver/runs', null, dH()).catch(() => []);
+      if (runs && runs.length > 0) {
+        showOffer(runs[0]);
+      } else {
+        showPane('waiting');
+      }
     }
-  }catch(e){$('#me').innerHTML=`<p class=err>${e.message}</p>`}
+    updateMapMarkers();
+  } catch (e) {
+    if (e.status === 401) { sessionStorage.removeItem('driver_token'); clearInterval(pollTimer); location.reload(); }
+  }
 }
 
-function hideMap(){
-  const el=document.getElementById('run-map');
-  if(el)el.style.display='none';
-  if(_map){_map.remove();_map=null;}
+function showPane(name) {
+  ['waiting','offer','active','earnings'].forEach(n => {
+    const el = document.getElementById('pane-' + n);
+    el.style.display = n === name ? 'flex' : 'none';
+  });
 }
 
-function showRunMap(parcels, region){
-  const el=document.getElementById('run-map');
-  if(!el||!parcels.length||!window.maplibregl||!window.pmtiles){return hideMap();}
-  el.style.display='block';
+function showOffer(run) {
+  document.getElementById('offer-earn').textContent = fmtR(run.payoutCents || 0);
+  document.getElementById('offer-km').textContent = (run.km || 0).toFixed(1) + ' km';
+  document.getElementById('offer-min').textContent = 'about ' + formatMin(run.minutes || 0);
 
-  // Register protocol once
-  if(!_protocolAdded){
-    const protocol=new pmtiles.Protocol();
-    maplibregl.addProtocol('pmtiles',protocol.tile.bind(protocol));
-    _protocolAdded=true;
+  const stops = document.getElementById('offer-stops');
+  const parcels = run.parcelList || run.parcels_detail || [];
+  if (parcels.length) {
+    stops.innerHTML = parcels.map((p, i) => `
+      <div class="stop-row">
+        <span class="stop-num pickup">${i + 1}</span>
+        <span style="flex:1;font-size:14px;font-weight:700">Pickup · ${p.pickup_name || '—'}</span>
+      </div>
+      <div class="stop-row">
+        <span class="stop-num drop">${i + 1}</span>
+        <span style="flex:1;font-size:14px;font-weight:700">Drop-off · ${p.drop_name || '—'}</span>
+      </div>`).join('');
+  } else {
+    stops.innerHTML = `<div style="color:var(--mute);font-size:14px">${run.parcels} stop${run.parcels !== 1 ? 's' : ''} · ${fmtR(run.payoutCents)}</div>`;
   }
 
-  const tilesPath=(region.map&&region.map.tilesUrl)||'/maps/jhb.pmtiles';
-  const tileUrl='pmtiles://'+window.location.origin+tilesPath;
+  document.getElementById('btn-accept').dataset.runId = run.id;
+  showPane('offer');
+}
 
-  const style={
-    version:8,
-    sources:{protomaps:{type:'vector',url:tileUrl,attribution:'© <a href="https://openstreetmap.org">OpenStreetMap</a> contributors'}},
-    layers:[
-      {id:'bg',type:'background',paint:{'background-color':'#f0ece6'}},
-      {id:'earth',type:'fill',source:'protomaps','source-layer':'earth',paint:{'fill-color':'#f0ece6'}},
-      {id:'water',type:'fill',source:'protomaps','source-layer':'water',paint:{'fill-color':'#a8d4e6'}},
-      {id:'landuse',type:'fill',source:'protomaps','source-layer':'landuse',paint:{'fill-color':'#dff0d0','fill-opacity':0.6}},
-      {id:'buildings',type:'fill',source:'protomaps','source-layer':'buildings',minzoom:13,paint:{'fill-color':'#d8d4cc','fill-outline-color':'#b8b3ab'}},
-      {id:'roads_minor',type:'line',source:'protomaps','source-layer':'roads',paint:{'line-color':'#ffffff','line-width':['interpolate',['linear'],['zoom'],11,1,16,4]}},
-      {id:'roads_major',type:'line',source:'protomaps','source-layer':'roads',filter:['in',['get','pmap:kind'],['literal',['primary','secondary','trunk','highway']]],paint:{'line-color':'#f0d878','line-width':['interpolate',['linear'],['zoom'],10,2,16,8]}},
-    ]
-  };
+function showActiveTrip() {
+  const active = currentParcels.find(p => p.status === 'batched' || p.status === 'collected' || p.status === 'out_for_delivery');
+  if (!active) { showPane('waiting'); return; }
 
-  if(_map){_map.remove();_map=null;}
+  const idx = currentParcels.indexOf(active);
+  const total = currentParcels.length;
+  const earn = document.getElementById('active-earn');
+  earn.textContent = 'Trip accepted · ' + fmtR(currentRun.payoutCents || 0);
 
-  const fallback=[region.center.lng,region.center.lat];
-  const fp=parcels.find(p=>p.pickup_lat&&p.pickup_lng);
-  _map=new maplibregl.Map({container:el,style,center:fp?[fp.pickup_lng,fp.pickup_lat]:fallback,zoom:12,attributionControl:true});
+  if (active.status === 'batched') {
+    document.getElementById('active-heading').textContent = 'Collect from ' + (active.pickup_name || 'pickup');
+    document.getElementById('active-sub').textContent = 'Stop ' + (idx + 1) + ' of ' + total;
+    document.getElementById('active-instruction').textContent = 'Pick up the parcels, then tap Collected.';
+    document.getElementById('active-code-section').style.display = 'none';
+    document.getElementById('btn-action').textContent = 'Collected';
+    document.getElementById('btn-action').dataset.orderId = active.id;
+    document.getElementById('btn-action').dataset.actionType = 'collect';
+    document.getElementById('btn-fail').style.display = 'none';
+  } else if (active.status === 'collected') {
+    document.getElementById('active-heading').textContent = 'Go to ' + (active.drop_name || 'drop-off');
+    document.getElementById('active-sub').textContent = 'Stop ' + (idx + 1) + ' of ' + total;
+    document.getElementById('active-instruction').textContent = 'Head to the drop-off address. Tap Out for delivery when you leave.';
+    document.getElementById('active-code-section').style.display = 'none';
+    document.getElementById('btn-action').textContent = 'Out for delivery';
+    document.getElementById('btn-action').dataset.orderId = active.id;
+    document.getElementById('btn-action').dataset.actionType = 'out';
+    document.getElementById('btn-fail').style.display = 'none';
+  } else if (active.status === 'out_for_delivery') {
+    document.getElementById('active-heading').textContent = 'At ' + (active.drop_name || 'drop-off');
+    document.getElementById('active-sub').textContent = 'Stop ' + (idx + 1) + ' of ' + total + ' · enter the code';
+    document.getElementById('active-instruction').textContent = 'Ask the recipient for their 4-digit code to confirm delivery.';
+    document.getElementById('active-code-section').style.display = 'flex';
+    document.getElementById('btn-action').textContent = 'Confirm delivery';
+    document.getElementById('btn-action').dataset.orderId = active.id;
+    document.getElementById('btn-action').dataset.actionType = 'deliver';
+    document.getElementById('btn-fail').style.display = '';
+    setupCodeInputs();
+  }
+  showPane('active');
+}
 
-  _map.on('error',()=>{
-    // Tiles not downloaded yet — show message without crashing
-    if(_map){_map.remove();_map=null;}
-    el.innerHTML='<div style="padding:2rem;text-align:center;color:#666;font-size:.9rem">Map tiles not available.<br>Run: <code>node scripts/get-map.js</code></div>';
-    el.style.display='block';
-  });
-
-  _map.on('load',()=>{
-    const bounds=new maplibregl.LngLatBounds();
-    let hasCoords=false;
-    parcels.forEach((p,i)=>{
-      const seq=String(i+1);
-      if(p.pickup_lat&&p.pickup_lng){
-        hasCoords=true; bounds.extend([p.pickup_lng,p.pickup_lat]);
-        const d=document.createElement('div');
-        d.title=`Pickup ${seq}: ${p.pickup_name}`;
-        d.style.cssText='width:26px;height:26px;border-radius:50%;background:#e8590c;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:bold;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.3)';
-        d.textContent=seq;
-        new maplibregl.Marker({element:d}).setLngLat([p.pickup_lng,p.pickup_lat]).setPopup(new maplibregl.Popup({offset:16}).setHTML(`<b>Pickup #${seq}</b><br>${p.pickup_name}`)).addTo(_map);
-      }
-      if(p.drop_lat&&p.drop_lng){
-        hasCoords=true; bounds.extend([p.drop_lng,p.drop_lat]);
-        const d=document.createElement('div');
-        d.title=`Drop ${seq}: ${p.drop_name}`;
-        d.style.cssText='width:26px;height:26px;border-radius:4px;background:#c01515;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:bold;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.3)';
-        d.textContent=seq;
-        new maplibregl.Marker({element:d}).setLngLat([p.drop_lng,p.drop_lat]).setPopup(new maplibregl.Popup({offset:16}).setHTML(`<b>Drop #${seq}</b><br>${p.drop_name}`)).addTo(_map);
-      }
-    });
-    if(hasCoords&&!bounds.isEmpty())_map.fitBounds(bounds,{padding:60,maxZoom:15});
+function setupCodeInputs() {
+  ['code-0','code-1','code-2','code-3'].forEach((id, i, arr) => {
+    const el = document.getElementById(id);
+    el.value = '';
+    el.oninput = () => { if (el.value && i < 3) document.getElementById(arr[i + 1]).focus(); };
+    el.onkeydown = (e) => { if (e.key === 'Backspace' && !el.value && i > 0) document.getElementById(arr[i - 1]).focus(); };
   });
 }
 
-function actions(p){const el=$('#a'+p.id),nxt={batched:['collect','Collected'],collected:['out','Out for delivery'],out_for_delivery:null}[p.status];
-if(nxt)el.innerHTML=`<button data-x="${nxt[0]}">${nxt[1]}</button>`;
-else if(p.status==='out_for_delivery')el.innerHTML=`<input placeholder="Recipient's 4-digit code" id="c${p.id}" inputmode="numeric"><button data-x="deliver">Delivered</button><button class="alt" data-x="fail">Could not deliver</button>`;
-else if(p.status==='failed')el.innerHTML=`<button data-x="return">Returned to sender</button>`;
-el.querySelectorAll('[data-x]').forEach(b=>b.onclick=async()=>{const a=b.dataset.x,body={action:a};if(a==='deliver')body.code=$('#c'+p.id).value;if(a==='fail')body.reason='recipient unreachable';
-try{await api('POST','/api/driver/scan/'+p.id,body,H);load()}catch(e){alert(e.message)}})}
+function getCode() { return ['code-0','code-1','code-2','code-3'].map(id => document.getElementById(id).value).join(''); }
 
-function switchTab(tab){
-  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));
-  $('#tab-runs').style.display=tab==='runs'?'':'none';
-  $('#tab-earnings').style.display=tab==='earnings'?'':'none';
-  if(tab==='earnings')loadEarnings();
+document.getElementById('btn-accept').onclick = async () => {
+  const runId = document.getElementById('btn-accept').dataset.runId;
+  try {
+    await api('POST', `/api/driver/runs/${runId}/accept`, {}, dH());
+    await refresh();
+  } catch (e) { alert(e.message); }
+};
+
+document.getElementById('btn-decline').onclick = async () => {
+  showPane('waiting');
+};
+
+document.getElementById('btn-action').onclick = async () => {
+  const btn = document.getElementById('btn-action');
+  const orderId = btn.dataset.orderId;
+  const actionType = btn.dataset.actionType;
+  const errEl = document.getElementById('active-err');
+  errEl.style.display = 'none';
+  btn.disabled = true;
+
+  try {
+    const body = { action: actionType };
+    if (actionType === 'deliver') {
+      body.code = getCode();
+      if (body.code.length !== 4) { errEl.textContent = 'Enter the full 4-digit code.'; errEl.style.display = ''; btn.disabled = false; return; }
+    }
+    await api('POST', `/api/driver/scan/${orderId}`, body, dH());
+    await refresh();
+  } catch (e) {
+    errEl.textContent = e.message || 'Something went wrong.';
+    errEl.style.display = '';
+  } finally { btn.disabled = false; }
+};
+
+document.getElementById('btn-fail').onclick = async () => {
+  const btn = document.getElementById('btn-action');
+  const orderId = btn.dataset.orderId;
+  if (!confirm('Mark this parcel as could not deliver?')) return;
+  try {
+    await api('POST', `/api/driver/scan/${orderId}`, { action: 'fail', reason: 'recipient unreachable' }, dH());
+    await refresh();
+  } catch (e) { alert(e.message); }
+};
+
+document.getElementById('btn-logout').onclick = () => {
+  sessionStorage.removeItem('driver_token');
+  clearInterval(pollTimer);
+  location.href = 'driver.html';
+};
+
+document.getElementById('btn-earnings-toggle').onclick = async () => {
+  if (document.getElementById('pane-earnings').style.display === 'none') {
+    await loadEarnings();
+    showPane('earnings');
+  } else { showPane(currentRun ? 'active' : 'waiting'); }
+};
+
+document.getElementById('btn-show-waiting').onclick = () => { showPane(currentRun ? 'active' : 'waiting'); };
+
+async function loadEarnings() {
+  try {
+    const e = await api('GET', '/api/driver/earnings', null, dH());
+    document.getElementById('earn-payable').textContent = fmtR(e.payableCents || 0);
+    const tbl = document.getElementById('earn-table');
+    if (e.runs && e.runs.length) {
+      tbl.innerHTML = '<div style="font-size:14px;font-weight:700;margin-bottom:8px">Recent trips</div>' +
+        e.runs.map(r => `<div style="display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);font-size:14px">
+          <span style="color:var(--mute)">${r.service_date || '—'} · ${r.km ? r.km.toFixed(1) + ' km' : '—'}</span>
+          <span style="font-weight:700">${fmtR(r.payout_cents)}</span>
+        </div>`).join('');
+    } else { tbl.innerHTML = '<p style="color:var(--mute);font-size:14px">No completed trips yet.</p>'; }
+  } catch (e) { document.getElementById('earn-table').innerHTML = '<p style="color:var(--danger);font-size:14px">' + e.message + '</p>'; }
 }
 
-async function loadEarnings(){
-  if(!Object.keys(H).length){$('#earn-content').innerHTML='<p class="mute">Open your driver profile first.</p>';return;}
-  try{
-    const e=await api('GET','/api/driver/earnings',null,H);
-    const fmt=(c)=>'R'+(c/100).toFixed(2);
-    let html=`<div class="card" style="text-align:center"><div class="big" style="color:var(--blue-light)">${fmt(e.payableCents)}</div><div class="mute">Available to pay out</div></div>`;
-    if(e.runs.length){
-      html+=`<div class="card"><h2>Recent runs</h2><table><thead><tr><th>Date</th><th>Distance</th><th>Pay</th><th>Bonus</th></tr></thead><tbody>`;
-      html+=e.runs.map(r=>`<tr class="earn-row"><td>${r.service_date||'—'}</td><td>${r.km?r.km.toFixed(1)+' km':'—'}</td><td>${fmt(r.payout_cents)}</td><td>${r.bonus_cents?fmt(r.bonus_cents):'—'}</td></tr>`).join('');
-      html+=`</tbody></table></div>`;
-    }
-    if(e.payouts.length){
-      html+=`<div class="card"><h2>Payout history</h2><table><thead><tr><th>Date</th><th>Paid</th><th>Held</th><th>Status</th></tr></thead><tbody>`;
-      html+=e.payouts.map(p=>`<tr class="earn-row"><td>${fmtDate(new Date(p.at).toISOString())}</td><td>${fmt(p.amount_cents)}</td><td>${fmt(p.holdback_cents)}</td><td>${p.status}</td></tr>`).join('');
-      html+=`</tbody></table><p class="mute" style="font-size:.8rem">10% is held for 3 days then released automatically.</p></div>`;
-    }
-    $('#earn-content').innerHTML=html;
-  }catch(e){$('#earn-content').innerHTML=`<p class="err">${e.message}</p>`;}
+function initMap() {
+  if (!window.maplibregl || !window.pmtiles) return;
+  if (!protocolAdded) {
+    const protocol = new pmtiles.Protocol();
+    maplibregl.addProtocol('pmtiles', protocol.tile.bind(protocol));
+    protocolAdded = true;
+  }
+  const tilesUrl = region.map && region.map.tilesUrl ? region.map.tilesUrl : '/maps/jhb.pmtiles';
+  map = new maplibregl.Map({
+    container: 'map-canvas',
+    style: { version: 8, sources: { pm: { type: 'vector', url: 'pmtiles://' + window.location.origin + tilesUrl } }, layers: [
+      { id: 'bg', type: 'background', paint: { 'background-color': '#EAF0F5' } },
+      { id: 'earth', type: 'fill', source: 'pm', 'source-layer': 'earth', paint: { 'fill-color': '#EAF0F5' } },
+      { id: 'water', type: 'fill', source: 'pm', 'source-layer': 'water', paint: { 'fill-color': '#BDD8EC' } },
+      { id: 'parks', type: 'fill', source: 'pm', 'source-layer': 'landuse', paint: { 'fill-color': '#d5e8c4', 'fill-opacity': 0.7 } },
+      { id: 'roads', type: 'line', source: 'pm', 'source-layer': 'roads', paint: { 'line-color': '#FFFFFF', 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1, 16, 4] } },
+      { id: 'highways', type: 'line', source: 'pm', 'source-layer': 'roads', filter: ['in', ['get', 'pmap:kind'], ['literal', ['primary', 'secondary', 'trunk', 'highway']]], paint: { 'line-color': '#f0d878', 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2, 16, 8] } },
+    ] },
+    center: [region.center.lng, region.center.lat], zoom: 13,
+  });
+  map.on('error', () => {});
 }
-</script></body></html>
+
+function updateMapMarkers() {
+  if (!map || !currentParcels.length) return;
+}
+
+function formatMin(m) { if (m < 60) return m + ' min'; return Math.floor(m / 60) + 'h ' + (m % 60) + 'm'; }
+function fmtR(c) { return 'R' + (c / 100).toFixed(2); }
+</script>
+</body>
+</html>

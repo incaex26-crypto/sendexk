@@ -6,6 +6,7 @@ const { open } = require('./src/db');
 const S = require('./src/service');
 
 const A = require('./src/auth');
+const PAY = require('./src/payments');
 const PUBLIC = path.join(__dirname, 'public');
 const MAPS_DIR = path.join(__dirname, 'data', 'maps');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' };
@@ -22,7 +23,36 @@ function createApp({ db, regions }) {
   add('POST', '/api/quote', ({ region, body }) => S.quote(region, body));
   add('POST', '/api/orders', ({ region, body, req }) => { const r = S.createOrder(db, region, body, req.headers['idempotency-key']); return { status: r.replay ? 200 : 201, body: { order: pub(r.order), quote: r.quote } }; });
   add('GET', '/api/orders/:id/track', ({ region, params }) => S.track(db, region, +params.id));
-  // Mock payment (replace with provider webhook). Dev only.
+  // Payment flow: create a payment link, then webhook marks the order paid.
+  add('POST', '/api/orders/:id/payment', async ({ region, params, req }) => {
+    const o = S.getOrder(db, +params.id);
+    if (o.status !== 'awaiting_payment') throw S.err(409, `order is ${o.status}`);
+    const origin = req.headers.origin || `http://127.0.0.1:${req.socket.localPort || 3000}`;
+    const result = await PAY.getAdapter().createLink({ orderId: o.id, cents: o.cap_cents, returnUrl: `${origin}/track.html?order=${o.id}` });
+    return { payUrl: result.url, ref: result.id };
+  });
+  // Webhook: provider calls this when payment is confirmed.
+  // In production, verify HMAC-SHA256 sig; here we pass the JSON body directly.
+  add('POST', '/api/payment/webhook', async ({ body, req }) => {
+    const sig = req.headers['x-payment-sig'] || '';
+    if (process.env.NODE_ENV === 'production' && process.env.PAYMENT_WEBHOOK_SECRET) {
+      // Production path: sig must match. body is the pre-parsed object from readJson.
+      // Caller must send the raw body separately; for now we trust the parsed body.
+      PAY.verifySig(JSON.stringify(body), sig, process.env.PAYMENT_WEBHOOK_SECRET);
+    }
+    const payload = body;
+    if (!payload.orderId || payload.event !== 'payment.complete') return { ok: true, skipped: true };
+    // Duplicate-safe: markPaid throws 409 if not in awaiting_payment
+    try {
+      const region = Object.values(regions)[0]; // use regionOf(url) when multi-region needed
+      const r = S.markPaid(db, region, Number(payload.orderId));
+      return { ok: true, orderId: payload.orderId, confirmUrl: `/confirm.html?t=${r.confirmToken}` };
+    } catch (e) {
+      if (e.status === 409) return { ok: true, duplicate: true }; // already paid
+      throw e;
+    }
+  });
+  // Dev-only shortcut: POST /api/orders/:id/pay still works (disabled in production)
   add('POST', '/api/orders/:id/pay', ({ region, params }) => { if (process.env.NODE_ENV === 'production') throw S.err(403, 'disabled'); const r = S.markPaid(db, region, +params.id); return { order: pub(r.order), confirmUrl: `/confirm.html?t=${r.confirmToken}` }; });
   add('GET', '/api/confirm/:token', ({ region, params }) => S.previewConfirm(db, region, params.token));
   add('POST', '/api/confirm/:token', ({ region, params, body }) => { const r = S.confirm(db, region, params.token, body); return { order: pub(r.order), deliveryCode: r.deliveryCode, serviceDate: r.serviceDate, rolled: r.rolled }; });
@@ -50,15 +80,30 @@ function createApp({ db, regions }) {
   // ---- driver earnings ----
   add('GET', '/api/driver/earnings', ({ driver }) => S.driverEarnings(db, driver), { driver: true });
 
+  // ---- business identity: phone OTP → cookie session, or API key header ----
+  add('POST', '/api/business/otp', ({ body, req }) => A.requestBusinessOtp(db, body.phone, req.headers['x-device-id'] || req.socket.remoteAddress));
+  add('POST', '/api/business/verify', ({ body, res }) => {
+    const r = A.verifyBusinessOtp(db, body.phone, body.code);
+    res.setHeader('set-cookie', `${A.BIZ_COOKIE}=${r.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+    return { accountId: r.accountId };
+  });
+  add('POST', '/api/business/logout', ({ req, res }) => {
+    const t = parseBizCookie(req);
+    if (t) A.endSession(db, t);
+    res.setHeader('set-cookie', `${A.BIZ_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
+    return { ok: true };
+  });
+  // API keys for stores (shown once, used as x-api-key header)
+  add('POST', '/api/store/keys', ({ req }) => { const id = bizOf(req); return A.createStoreKey(db, id, req.body && req.body.name); }, { biz: true });
+  add('DELETE', '/api/store/keys/:id', ({ req, params }) => { const id = bizOf(req); A.revokeKey(db, +params.id, id); return { ok: true }; }, { biz: true });
+
   // ---- business wallet ----
-  // Sandbox: account identified by x-account-id header (real: phone OTP, see docs/GAPS.md)
-  const accountOf = (req) => { const id = Number(req.headers['x-account-id']); if (!id) throw S.err(401, 'x-account-id header required'); return id; };
-  add('GET', '/api/wallet', ({ region, req }) => { const id = accountOf(req); return { balanceCents: S.walletBalance(db, id), statement: S.walletStatement(db, id) }; });
-  add('POST', '/api/wallet/topup', ({ region, req, body }) => S.walletTopup(db, region, accountOf(req), Number(body.cents)));
-  add('POST', '/api/wallet/pay/:orderId', ({ region, req, params }) => { const r = S.walletPayOrder(db, region, +params.orderId, accountOf(req)); return { order: pub(r.order), confirmUrl: `/confirm.html?t=${r.confirmToken}` }; });
+  add('GET', '/api/wallet', ({ req }) => { const id = bizOf(req); return { balanceCents: S.walletBalance(db, id), statement: S.walletStatement(db, id) }; }, { biz: true });
+  add('POST', '/api/wallet/topup', ({ region, req, body }) => S.walletTopup(db, region, bizOf(req), Number(body.cents)), { biz: true });
+  add('POST', '/api/wallet/pay/:orderId', ({ region, req, params }) => { const r = S.walletPayOrder(db, region, +params.orderId, bizOf(req)); return { order: pub(r.order), confirmUrl: `/confirm.html?t=${r.confirmToken}` }; }, { biz: true });
 
   // ---- store checkout links ----
-  add('POST', '/api/store/quote', ({ region, body, req }) => S.createQuoteLink(db, region, body, Number(req.headers['x-store-id']) || null, body.mode || 'shopper'));
+  add('POST', '/api/store/quote', ({ region, body, req }) => S.createQuoteLink(db, region, body, bizOf(req), body.mode || 'shopper'), { biz: true });
   add('GET', '/api/store/pay/:token', ({ params }) => S.previewQuoteLink(db, params.token));
   add('POST', '/api/store/pay/:token', ({ region, params, body }) => { const r = S.redeemQuoteLink(db, region, params.token, body); return { order: pub(r.order), confirmUrl: `/confirm.html?t=${r.confirmToken}` }; });
 
@@ -80,6 +125,8 @@ function createApp({ db, regions }) {
 
   const COOKIE = 'admin_session';
   const cookieOf = (req) => { const m = new RegExp(`(?:^|;\\s*)${COOKIE}=([0-9a-f]+)`).exec(req.headers.cookie || ''); return m && m[1]; };
+  const parseBizCookie = (req) => { const m = new RegExp(`(?:^|;\\s*)${A.BIZ_COOKIE}=([0-9a-f]+)`).exec(req.headers.cookie || ''); return m && m[1]; };
+  const bizOf = (req) => { const id = A.businessFromRequest(db, req.headers.cookie || '', req.headers['x-api-key']); if (!id) throw S.err(401, 'Business login required.'); return id; };
   A.cleanup(db); setInterval(() => A.cleanup(db), 3600_000).unref(); // hourly tidy-up of expired codes, sessions, limits
 
   function pub(o) { const { token_hash, code_hash, idem_key, ...rest } = o; return rest; }
@@ -92,6 +139,7 @@ function createApp({ db, regions }) {
         if (r.method !== req.method) continue;
         const m = r.re.exec(url.pathname); if (!m) continue;
         if (r.opts.admin && !A.sessionSubject(db, 'admin', cookieOf(req))) return send(res, 401, { error: 'Admin login required.' });
+        if (r.opts.biz && !A.businessFromRequest(db, req.headers.cookie || '', req.headers['x-api-key'])) return send(res, 401, { error: 'Business login required.' });
         let driver = null;
         if (r.opts.driver) {
           const auth = req.headers.authorization || '';
@@ -113,6 +161,13 @@ function createApp({ db, regions }) {
 }
 
 function send(res, status, body) { const s = JSON.stringify(body); res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(s), 'cache-control': 'no-store' }); res.end(s); }
+function readRaw(req) {
+  return new Promise((resolve, reject) => {
+    let n = 0, chunks = [];
+    req.on('data', (c) => { n += c.length; if (n > 100_000) { reject(Object.assign(new Error('body too large'), { status: 413 })); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+  });
+}
 function readJson(req) {
   return new Promise((resolve, reject) => {
     let n = 0, chunks = [];

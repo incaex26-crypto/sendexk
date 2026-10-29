@@ -1,125 +1,173 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Confirm delivery — SenDexk</title>
-<link rel="stylesheet" href="/app.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Confirm and pay — SenDexk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
 <style>
-#map-wrap{width:100%;height:320px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card);position:relative;margin:10px 0}
-#map-fallback{display:none;padding:14px;text-align:center;color:var(--mute)}
-.price-box{background:var(--card);border:2px solid var(--brand);border-radius:10px;padding:14px;margin:10px 0;text-align:center}
-.price-box .num{font-size:2rem;font-weight:700;color:var(--brand)}
-#section-confirm,#section-done,#section-expired{display:none}
+body { background: var(--sheet); }
+.route-col { display:flex;flex-direction:column;align-items:center;padding-top:5px; }
+.page-header { display:flex;align-items:center;gap:12px;padding:20px 16px 0; }
+.scroll-body { padding: 0 16px; padding-bottom: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+.footer { position:fixed;left:0;right:0;bottom:0;background:var(--sheet);border-top:1px solid var(--border);padding:14px 16px 20px;display:flex;flex-direction:column;gap:10px; }
 </style>
-<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin>
-<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin></script>
-<script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js" integrity="sha384-QfbOCebHNw8pQiPAOd2IFee2v2A5VYZxBk0+JGZ5H+3mfzVIp6zsQNkTsfGJot93" crossorigin></script>
 </head>
 <body>
-<nav><a href="/">Book</a> <a href="/track.html">Track</a></nav>
-
-<div id="section-loading">
-  <div class="card"><p class="mute">Loading your delivery details…</p></div>
-</div>
-<div id="section-expired">
-  <div class="card">
-    <h1>Link expired</h1>
-    <p>This delivery link has expired. Return to the store to choose delivery again.</p>
-  </div>
-</div>
-<div id="section-confirm">
-  <h1>Confirm your delivery</h1>
-  <div class="card">
-    <div class="mute">Delivering to</div>
-    <div id="drop-addr" style="font-weight:600;margin:.3rem 0"></div>
-    <div id="store-info" class="mute"></div>
-  </div>
-  <div id="map-wrap"><div id="map" style="width:100%;height:100%"></div><div id="map-fallback">Map unavailable — drag the pin or use GPS below.</div></div>
-  <p class="mute" style="font-size:.85rem">Drag the pin to your exact door, or tap <strong>Use my location</strong>.</p>
-  <button class="alt" id="btn-gps" style="width:auto;padding:.4rem .9rem;margin-bottom:4px">Use my location</button>
-  <div class="price-box">
-    <div class="mute">You pay</div>
-    <div class="num" id="price-display">—</div>
-    <div class="mute" style="font-size:.8rem">This is the maximum — you may be charged less.</div>
-  </div>
-  <button id="btn-pay">Confirm location and pay</button>
-  <p id="pay-msg" class="err"></p>
-</div>
-<div id="section-done">
-  <div class="card">
-    <h2>Payment confirmed</h2>
-    <p>Your delivery is booked. The recipient will receive a confirmation link to verify the drop-off point.</p>
-    <a id="track-link" href="/track.html" style="color:var(--brand)">Track your delivery →</a>
-  </div>
+<div class="page-header">
+  <a href="choose.html" class="nav-pill" style="position:static;width:48px;height:48px;border-radius:24px;padding:0;justify-content:center" aria-label="Back">
+    <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+  </a>
+  <h1>Confirm and pay</h1>
 </div>
 
-<script src="/app.js"></script>
+<div class="scroll-body">
+  <!-- Trip summary -->
+  <div class="card" id="summary-card">
+    <div class="row" style="gap:14px;align-items:flex-start">
+      <div class="route-col">
+        <div class="dot-pickup"></div>
+        <div class="dot-line" style="height:30px"></div>
+        <div class="dot-drop"></div>
+      </div>
+      <div class="col" style="gap:14px;flex:1">
+        <div class="col"><span class="label">Pickup</span><span style="font-size:15px;font-weight:700" id="pickup-addr">—</span></div>
+        <div class="col"><span class="label">Drop-off</span><span style="font-size:15px;font-weight:700" id="drop-addr">—</span></div>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="row" style="justify-content:space-between;font-size:14px"><span style="color:var(--mute);font-weight:600">Vehicle</span><span style="font-weight:700" id="veh-label">—</span></div>
+    <div class="row" style="justify-content:space-between;font-size:14px"><span style="color:var(--mute);font-weight:600">Delivery fee</span><span style="font-weight:800" id="fee-label">—</span></div>
+  </div>
+
+  <!-- Recipient -->
+  <div style="display:flex;gap:10px">
+    <div class="col" style="flex:1;gap:6px">
+      <label for="rname" class="label">Recipient name</label>
+      <input id="rname" type="text" placeholder="Full name">
+    </div>
+    <div class="col" style="flex:1;gap:6px">
+      <label for="rphone" class="label">Recipient phone</label>
+      <input id="rphone" type="tel" placeholder="+27 …">
+    </div>
+  </div>
+
+  <!-- Sender -->
+  <div class="col" style="gap:6px">
+    <label for="sname" class="label">Your name</label>
+    <input id="sname" type="text" placeholder="Full name">
+  </div>
+
+  <!-- Pay with -->
+  <div class="col" style="gap:8px">
+    <span style="font-size:14px;font-weight:800">Pay with</span>
+    <button class="pay-row" id="wallet-row" style="display:none" data-m="wallet">
+      <span class="radio-dot" id="wallet-dot"></span>
+      <span class="flex1 col"><span style="font-size:15px;font-weight:700">Wallet</span><span style="font-size:12px;font-weight:500;color:var(--mute)" id="wallet-bal-label"></span></span>
+    </button>
+    <button class="pay-row selected" id="card-row" data-m="card">
+      <span class="radio-dot checked" id="card-dot"></span>
+      <span class="flex1" style="font-size:15px;font-weight:700">Card</span>
+    </button>
+    <button class="pay-row" id="eft-row" data-m="eft">
+      <span class="radio-dot" id="eft-dot"></span>
+      <span class="flex1" style="font-size:15px;font-weight:700">Instant EFT</span>
+    </button>
+  </div>
+
+  <div id="err-msg" class="err" style="display:none"></div>
+</div>
+
+<div class="footer">
+  <p style="margin:0;font-size:12px;line-height:1.4;color:var(--mute)">The recipient gets a 4-digit code by message and gives it to the driver to confirm delivery.</p>
+  <button class="btn btn-primary" id="pay-btn">Pay <span id="pay-amount">—</span></button>
+</div>
+
 <script>
-const token = new URLSearchParams(location.search).get('t');
-let pinLat = null, pinLng = null, mapInst = null;
-
-function show(id) {
-  ['section-loading','section-expired','section-confirm','section-done'].forEach((s) => {
-    document.getElementById(s).style.display = s === id ? '' : 'none';
-  });
-}
+const ss = k => JSON.parse(sessionStorage.getItem('book.' + k) || 'null');
+let selMethod = 'card', walletBal = 0, orderId = null, region;
 
 async function init() {
-  if (!token) { show('section-expired'); return; }
-  let spec;
-  try { spec = await api('GET', `/api/store/pay/${token}`); }
-  catch (e) {
-    if (e.status === 410 || e.status === 409) { show('section-expired'); return; }
-    show('section-expired'); return;
+  region = await fetch('/api/region').then(r => r.json());
+  const p = ss('pickup'), d = ss('drop'), v = ss('vehicle'), cap = ss('capCents');
+  document.getElementById('pickup-addr').textContent = p ? (p.address || `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`) : '—';
+  document.getElementById('drop-addr').textContent = d ? (d.address || `${d.lat.toFixed(4)},${d.lng.toFixed(4)}`) : '—';
+  document.getElementById('veh-label').textContent = v ? (region.vehicles && region.vehicles[v] ? region.vehicles[v].label : v) : '—';
+  document.getElementById('fee-label').textContent = cap ? fmtR(cap) : '—';
+  document.getElementById('pay-amount').textContent = cap ? fmtR(cap) : '—';
+
+  // Check wallet
+  const w = await fetch('/api/wallet', { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null);
+  if (w) {
+    walletBal = w.balanceCents;
+    document.getElementById('wallet-row').style.display = 'flex';
+    document.getElementById('wallet-bal-label').textContent = 'Balance ' + fmtR(walletBal);
+    if (walletBal >= (cap || 0)) pickMethod('wallet');
   }
-  pinLat = spec.spec.drop?.lat ?? -26.1;
-  pinLng = spec.spec.drop?.lng ?? 28.05;
-  $('#drop-addr').textContent = spec.spec.drop?.address || 'Drop-off address';
-  $('#store-info').textContent = spec.storeId ? `Store order` : 'Standard delivery';
-  // Price: re-quote to show
-  try {
-    const region = await api('GET', '/api/region');
-    const q = await api('POST', '/api/quote', { pickup: spec.spec.pickup, drop: spec.spec.drop, vehicleClass: spec.spec.vehicleClass || 'car' });
-    $('#price-display').textContent = 'R' + (q.cap / 100).toFixed(2);
-  } catch { $('#price-display').textContent = '—'; }
-  show('section-confirm');
-  // Map
-  try {
-    const region = await api('GET', '/api/region');
-    mapInst = tileMap($('#map'), region, {
-      height: 320,
-      center: [pinLng, pinLat],
-      zoom: 15,
-      markers: [{ lng: pinLng, lat: pinLat, color: '#ef4444', draggable: true }],
-    });
-    if (mapInst) {
-      mapInst.map.on('mousedown', () => {});
-    }
-  } catch { $('#map-fallback').style.display = ''; }
+
+  // Pay method buttons
+  ['wallet', 'card', 'eft'].forEach(m => {
+    const row = document.getElementById(m + '-row');
+    if (row) row.onclick = () => pickMethod(m);
+  });
+
+  document.getElementById('pay-btn').onclick = pay;
 }
 
-$('#btn-gps').addEventListener('click', () => {
-  if (!navigator.geolocation) { $('#pay-msg').textContent = 'GPS not available.'; return; }
-  navigator.geolocation.getCurrentPosition((pos) => {
-    pinLat = pos.coords.latitude; pinLng = pos.coords.longitude;
+function pickMethod(m) {
+  selMethod = m;
+  ['wallet', 'card', 'eft'].forEach(x => {
+    const row = document.getElementById(x + '-row');
+    const dot = document.getElementById(x + '-dot');
+    if (row) { row.classList.toggle('selected', x === m); if (dot) dot.className = 'radio-dot' + (x === m ? ' checked' : ''); }
   });
-});
+}
 
-$('#btn-pay').addEventListener('click', async () => {
-  $('#btn-pay').disabled = true; $('#pay-msg').textContent = '';
+async function pay() {
+  const btn = document.getElementById('pay-btn');
+  btn.disabled = true; btn.textContent = 'Processing…';
+  document.getElementById('err-msg').style.display = 'none';
   try {
-    const body = {};
-    if (pinLat && pinLng) { body.lat = pinLat; body.lng = pinLng; }
-    const r = await api('POST', `/api/store/pay/${token}`, body);
-    if (r.order) {
-      $('#track-link').href = `/track.html?id=${r.order.id}`;
-      show('section-done');
+    const p = ss('pickup'), d = ss('drop'), v = ss('vehicle');
+    if (!p || !d || !v) throw new Error('Please set pickup and drop-off first.');
+    const rname = document.getElementById('rname').value.trim();
+    const rphone = document.getElementById('rphone').value.trim();
+    const sname = document.getElementById('sname').value.trim();
+    if (!rname || !rphone) throw new Error('Please enter the recipient name and phone number.');
+
+    // Create order
+    const or = await post('/api/orders', {
+      vehicleClass: v, weightKg: 2, category: 'parcel',
+      sender: { name: sname || 'Customer', phone: '' },
+      recipient: { name: rname, phone: rphone },
+      pickup: p, drop: d,
+    });
+    orderId = or.order.id;
+
+    if (selMethod === 'wallet') {
+      const wr = await post('/api/wallet/pay/' + orderId, {});
+      window.location.href = 'confirm.html?t=' + wr.confirmUrl.split('t=')[1];
+    } else {
+      // Get payment link, redirect to provider (or simulate in dev)
+      const pr = await post('/api/orders/' + orderId + '/payment', {});
+      // In dev the fake URL includes ?ref=..., redirect there then handle
+      window.location.href = pr.payUrl;
     }
   } catch (e) {
-    $('#pay-msg').textContent = e.message || 'Payment failed. Please try again.';
-    $('#btn-pay').disabled = false;
+    const el = document.getElementById('err-msg');
+    el.textContent = e.message || 'Something went wrong. Please try again.';
+    el.style.display = 'block';
+    btn.disabled = false; btn.innerHTML = 'Pay <span id="pay-amount">' + fmtR(ss('capCents') || 0) + '</span>';
   }
-});
+}
+
+function post(url, body) {
+  return fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include', body: JSON.stringify(body) })
+    .then(async r => { const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j; });
+}
+function fmtR(c) { return 'R' + (c / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
 
 init();
 </script>
