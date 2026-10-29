@@ -1,6 +1,6 @@
 # SenDexk build backlog
 
-Rules for the agent: do ONLY the task given. Read only the files named under "Files", plus CLAUDE.md. Use graphify-out/ to find things instead of reading the repo. Money is whole cents. Messages on screen use the wording rules in CLAUDE.md (South African English, "R125.00", no developer jargon). Add tests for every rule. All existing tests must keep passing. When finished, change this task's `status:` to `done` and add one line under "Result:". If stuck after 2 attempts, set `status: blocked` and add a "Blocked:" line with the exact problem and your recommended answer.
+Rules for the agent: do ONLY the task given. Read only the files named under "Files", plus CLAUDE.md. Use graphify-out/ to find things instead of reading the repo. Money is whole cents. Messages on screen use the wording rules in CLAUDE.md (South African English, "R125.00", no developer jargon). Add tests for every rule. All existing tests must keep passing. If a task changes database tables, add a test that starts from a database created with the previous schema and checks the upgrade works and old rows survive. When finished, change this task's `status:` to `done` and add one line under "Result:". If stuck after 2 attempts, set `status: blocked` and add a "Blocked:" line with the exact problem and your recommended answer.
 
 ## T1 · Security hardening
 risk: high
@@ -25,6 +25,16 @@ Steps:
 4. Message kinds with plain templates in one file: otp_code, booking_confirmed, driver_assigned, out_for_delivery, delivered, payment_received, wallet_low. No marketing kinds. Include opt-out flag per user; service messages always send.
 5. Replace the dev-mode OTP "show on screen" path so OTP codes go through notify() with the sandbox channel; keep dev mode showing the code ONLY when the fake adapter is active and the server was started with npm run dev.
 Done when: tests cover fallback order, all-channels-fail result, business-number routing, opt-out, and "no codes shown on a live server"; npm test passes.
+
+## T7 · Notification coverage
+risk: low
+status: todo
+Files: test/ and src/notify.js only
+Steps:
+1. In the all_channels_failed test, assert the exact failure reason for each channel in the customer default order (whatsapp: no_verified_business_whatsapp, email: provider_down), not just the count.
+2. Add end-to-end tests through the HTTP API: after driver_assigned, out_for_delivery, and delivered events, each sends exactly one message to the correct user (recipient phone for customer messages, driver phone for driver messages) on the right channel. Assert the outbox count and recipient after each step.
+3. Check that replaying the same event (calling the same state-change endpoint a second time) does not send a duplicate message.
+Done when: npm test passes; outbox assertions name specific channels and recipients; replay sends zero duplicates.
 
 ## T3 · Business wallet screen
 risk: high
