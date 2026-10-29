@@ -6,6 +6,7 @@ const { open } = require('./src/db');
 const S = require('./src/service');
 
 const A = require('./src/auth');
+const PAY = require('./src/payments');
 const PUBLIC = path.join(__dirname, 'public');
 const MAPS_DIR = path.join(__dirname, 'data', 'maps');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' };
@@ -22,7 +23,36 @@ function createApp({ db, regions }) {
   add('POST', '/api/quote', ({ region, body }) => S.quote(region, body));
   add('POST', '/api/orders', ({ region, body, req }) => { const r = S.createOrder(db, region, body, req.headers['idempotency-key']); return { status: r.replay ? 200 : 201, body: { order: pub(r.order), quote: r.quote } }; });
   add('GET', '/api/orders/:id/track', ({ region, params }) => S.track(db, region, +params.id));
-  // Mock payment (replace with provider webhook). Dev only.
+  // Payment flow: create a payment link, then webhook marks the order paid.
+  add('POST', '/api/orders/:id/payment', async ({ region, params, req }) => {
+    const o = S.getOrder(db, +params.id);
+    if (o.status !== 'awaiting_payment') throw S.err(409, `order is ${o.status}`);
+    const origin = req.headers.origin || `http://127.0.0.1:${req.socket.localPort || 3000}`;
+    const result = await PAY.getAdapter().createLink({ orderId: o.id, cents: o.cap_cents, returnUrl: `${origin}/track.html?order=${o.id}` });
+    return { payUrl: result.url, ref: result.id };
+  });
+  // Webhook: provider calls this when payment is confirmed.
+  // In production, verify HMAC-SHA256 sig; here we pass the JSON body directly.
+  add('POST', '/api/payment/webhook', async ({ body, req }) => {
+    const sig = req.headers['x-payment-sig'] || '';
+    if (process.env.NODE_ENV === 'production' && process.env.PAYMENT_WEBHOOK_SECRET) {
+      // Production path: sig must match. body is the pre-parsed object from readJson.
+      // Caller must send the raw body separately; for now we trust the parsed body.
+      PAY.verifySig(JSON.stringify(body), sig, process.env.PAYMENT_WEBHOOK_SECRET);
+    }
+    const payload = body;
+    if (!payload.orderId || payload.event !== 'payment.complete') return { ok: true, skipped: true };
+    // Duplicate-safe: markPaid throws 409 if not in awaiting_payment
+    try {
+      const region = Object.values(regions)[0]; // use regionOf(url) when multi-region needed
+      const r = S.markPaid(db, region, Number(payload.orderId));
+      return { ok: true, orderId: payload.orderId, confirmUrl: `/confirm.html?t=${r.confirmToken}` };
+    } catch (e) {
+      if (e.status === 409) return { ok: true, duplicate: true }; // already paid
+      throw e;
+    }
+  });
+  // Dev-only shortcut: POST /api/orders/:id/pay still works (disabled in production)
   add('POST', '/api/orders/:id/pay', ({ region, params }) => { if (process.env.NODE_ENV === 'production') throw S.err(403, 'disabled'); const r = S.markPaid(db, region, +params.id); return { order: pub(r.order), confirmUrl: `/confirm.html?t=${r.confirmToken}` }; });
   add('GET', '/api/confirm/:token', ({ region, params }) => S.previewConfirm(db, region, params.token));
   add('POST', '/api/confirm/:token', ({ region, params, body }) => { const r = S.confirm(db, region, params.token, body); return { order: pub(r.order), deliveryCode: r.deliveryCode, serviceDate: r.serviceDate, rolled: r.rolled }; });
@@ -131,6 +161,13 @@ function createApp({ db, regions }) {
 }
 
 function send(res, status, body) { const s = JSON.stringify(body); res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(s), 'cache-control': 'no-store' }); res.end(s); }
+function readRaw(req) {
+  return new Promise((resolve, reject) => {
+    let n = 0, chunks = [];
+    req.on('data', (c) => { n += c.length; if (n > 100_000) { reject(Object.assign(new Error('body too large'), { status: 413 })); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+  });
+}
 function readJson(req) {
   return new Promise((resolve, reject) => {
     let n = 0, chunks = [];

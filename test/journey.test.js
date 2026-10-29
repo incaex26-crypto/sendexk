@@ -8,6 +8,7 @@ const A = require('../src/auth');
 const N = require('../src/notify');
 const L = require('../src/ledger');
 const S = require('../src/service');
+const PAY = require('../src/payments');
 const clock = require('../src/clock');
 
 const HOUR = 3600000, MIN = 60000;
@@ -51,13 +52,34 @@ test('full ecosystem journey A→G', async () => {
     const or1 = await call('POST', '/api/orders', orderBody(), { 'idempotency-key': 'j-A1' });
     assert.equal(or1.order.status, 'awaiting_payment', 'A: order created');
 
-    const pay1 = await call('POST', `/api/orders/${or1.order.id}/pay`);
-    assert.equal(pay1.order.status, 'awaiting_confirmation', 'A: paid');
+    // Payment provider flow: create link → simulate webhook
+    PAY.resetAdapter(); // fresh adapter per test
+    const adapter = PAY.getAdapter();
+    const payLink = await call('POST', `/api/orders/${or1.order.id}/payment`);
+    assert.ok(payLink.payUrl, 'A: payment link returned');
+    assert.ok(payLink.ref, 'A: payment ref returned');
+    // Duplicate-safe: requesting again gives the same ref
+    const payLink2 = await call('POST', `/api/orders/${or1.order.id}/payment`);
+    assert.equal(payLink2.ref, payLink.ref, 'A: payment link is idempotent');
+    // Simulate provider webhook: POST { orderId, event, cents }
+    const whPayload = JSON.stringify({ orderId: or1.order.id, event: 'payment.complete', cents: or1.order.cap_cents });
+    const whR = await fetch(`http://127.0.0.1:${srv.address().port}/api/payment/webhook`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: whPayload,
+    });
+    const whJson = await whR.json();
+    assert.ok(whJson.ok, 'A: webhook accepted');
+    assert.ok(whJson.confirmUrl, 'A: confirmUrl in webhook response');
+    // Duplicate webhook: must not double-charge
+    const dupR = await fetch(`http://127.0.0.1:${srv.address().port}/api/payment/webhook`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: whPayload,
+    });
+    const dupJson = await dupR.json();
+    assert.ok(dupJson.ok && dupJson.duplicate, 'A: duplicate webhook is ignored');
+
     const notifAfterPay = N.outbox.filter((m) => m.kind === 'payment_received');
     assert.equal(notifAfterPay.length, 1, 'A: payment_received notification sent');
-    assert.ok(pay1.confirmUrl, 'A: confirmUrl returned');
 
-    const confToken = pay1.confirmUrl.split('t=')[1];
+    const confToken = whJson.confirmUrl.split('t=')[1];
     const conf1 = await call('POST', `/api/confirm/${confToken}`, { available: true, lat: P.rosebank.lat, lng: P.rosebank.lng });
     assert.equal(conf1.order.status, 'confirmed', 'A: recipient confirmed');
     assert.ok(conf1.deliveryCode, 'A: delivery code issued');
@@ -66,8 +88,14 @@ test('full ecosystem journey A→G', async () => {
     const extras = [];
     for (let i = 1; i <= 3; i++) {
       const o = await call('POST', '/api/orders', orderBody({ recipient: { name: `R${i}`, phone: `083111000${i}` }, drop: { lat: P.rosebank.lat + i * 0.003, lng: P.rosebank.lng, address: `Home ${i}` } }), { 'idempotency-key': `j-extra${i}` });
-      const p = await call('POST', `/api/orders/${o.order.id}/pay`);
-      const ct = p.confirmUrl.split('t=')[1];
+      // Use the payment link flow for extras too
+      await call('POST', `/api/orders/${o.order.id}/payment`);
+      const wb = JSON.stringify({ orderId: o.order.id, event: 'payment.complete', cents: o.order.cap_cents });
+      const wbR = await fetch(`http://127.0.0.1:${srv.address().port}/api/payment/webhook`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: wb,
+      });
+      const wbJ = await wbR.json();
+      const ct = wbJ.confirmUrl.split('t=')[1];
       const c = await call('POST', `/api/confirm/${ct}`, { available: true, lat: P.rosebank.lat + i * 0.003, lng: P.rosebank.lng });
       extras.push({ id: o.order.id, code: c.deliveryCode });
     }
