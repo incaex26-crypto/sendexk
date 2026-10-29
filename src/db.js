@@ -43,6 +43,15 @@ CREATE TABLE IF NOT EXISTS quote_links (
   quote_json TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'shopper', expires_at INTEGER NOT NULL,
   used_at INTEGER, order_id INTEGER, created_at INTEGER);
 CREATE INDEX IF NOT EXISTS ix_quote_links_hash ON quote_links(token_hash);
+CREATE TABLE IF NOT EXISTS driver_documents (
+  id INTEGER PRIMARY KEY, driver_id INTEGER NOT NULL, kind TEXT NOT NULL,
+  file_ref TEXT NOT NULL, status TEXT DEFAULT 'pending', uploaded_at INTEGER, reviewed_at INTEGER, note TEXT);
+CREATE INDEX IF NOT EXISTS ix_driver_docs ON driver_documents(driver_id, kind);
+CREATE TABLE IF NOT EXISTS platform_settings (
+  key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER, updated_by TEXT);
+CREATE TABLE IF NOT EXISTS disputes (
+  id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, reporter TEXT NOT NULL,
+  reason TEXT, status TEXT DEFAULT 'open', created_at INTEGER, resolved_at INTEGER, note TEXT);
 `;
 
 function open(file = ':memory:') {

@@ -122,6 +122,48 @@ function createApp({ db, regions }) {
   add('GET', '/api/admin/orders/:id', ({ params }) => ({ order: pub(S.getOrder(db, +params.id)), events: db.prepare("SELECT * FROM events WHERE entity='order' AND entity_id=? ORDER BY id").all(+params.id) }), { admin: true });
   add('POST', '/api/admin/drivers/:id/suspend', ({ region, params }) => { S.adminSuspendDriver(db, region, +params.id); return { ok: true }; }, { admin: true });
   add('GET', '/api/admin/notifications', ({ params }) => S.notificationLog(db, null, Number(params.limit) || 100), { admin: true });
+  // G3: platform settings
+  add('GET', '/api/admin/settings', () => S.getSettings(db), { admin: true });
+  add('PUT', '/api/admin/settings/:key', ({ region, params, body, req }) => S.setSetting(db, region, params.key, body.value, A.sessionSubject(db, 'admin', cookieOf(req))), { admin: true });
+  // G4: driver approvals and disputes
+  add('GET', '/api/admin/approvals', () => S.pendingApprovals(db), { admin: true });
+  add('POST', '/api/admin/drivers/:id/approve', ({ region, params, body, req }) => S.approveDriver(db, region, +params.id, A.sessionSubject(db, 'admin', cookieOf(req)), true, body.note), { admin: true });
+  add('POST', '/api/admin/drivers/:id/reject', ({ region, params, body, req }) => S.approveDriver(db, region, +params.id, A.sessionSubject(db, 'admin', cookieOf(req)), false, body.note), { admin: true });
+  add('GET', '/api/admin/disputes', ({ params }) => S.listDisputes(db, params.status || 'open'), { admin: true });
+  add('POST', '/api/admin/disputes/:id/resolve', ({ region, params, body, req }) => S.resolveDispute(db, region, +params.id, A.sessionSubject(db, 'admin', cookieOf(req)), body.note), { admin: true });
+  // B6: driver weekly statement
+  add('GET', '/api/driver/statement', ({ driver }) => S.driverWeeklyStatement(db, driver), { driver: true });
+  // B7: cancel order
+  add('POST', '/api/orders/:id/cancel', ({ region, params, body, req }) => {
+    // Allow business, driver (with their own auth), or admin (future)
+    const bizId = A.businessFromRequest(db, bizCookieOf(req), req.headers['x-api-key'] || null)
+      || Number(req.headers['x-account-id']) || 0;
+    const driverAuth = req.headers.authorization || '';
+    const driverId = A.driverFromRequest(db, driverAuth.startsWith('Bearer ') ? driverAuth.slice(7) : null, req.headers['x-driver-id']);
+    const actorKind = driverId ? 'driver' : (bizId ? 'business' : 'system');
+    const actorId = driverId || bizId || 0;
+    return S.cancelOrder(db, region, +params.id, actorKind, actorId, body.reason);
+  });
+  // D3: driver documents
+  add('POST', '/api/driver/documents', ({ driver, body }) => S.submitDocument(db, driver, body.kind, body.fileRef), { driver: true });
+  // D4: proof of delivery photo (stand-in)
+  add('POST', '/api/driver/scan/:orderId/photo', ({ region, params, driver, body }) => S.recordDeliveryPhoto(db, region, +params.orderId, driver, body.photoRef), { driver: true });
+  // E4: store plugin spec (stand-in)
+  add('GET', '/api/store/plugin/woocommerce', () => ({
+    name: 'SenDexk WooCommerce Plugin',
+    webhookUrl: '/api/store/pay/:token',
+    authHeader: 'x-api-key',
+    samplePayload: { token: '<quote_token>', recipient: { name: 'Customer', phone: '082…' }, drop: { lat: -26.2, lng: 28.0, address: 'Customer address' } },
+    note: 'Full OAuth plugin pending — see docs/BLOCKED.md.',
+  }));
+  add('GET', '/api/orders/:id/dispute', ({ region, params, body, req }) => {
+    const reporter = req.headers['x-account-id'] || req.headers['x-driver-id'] || 'anonymous';
+    return S.openDispute(db, region, +params.id, reporter, (body || {}).reason);
+  });
+  add('POST', '/api/orders/:id/dispute', ({ region, params, body, req }) => {
+    const reporter = String(req.headers['x-account-id'] || req.headers['x-driver-id'] || 'anonymous');
+    return S.openDispute(db, region, +params.id, reporter, (body || {}).reason);
+  });
 
   const COOKIE = 'admin_session';
   const cookieOf = (req) => { const m = new RegExp(`(?:^|;\\s*)${COOKIE}=([0-9a-f]+)`).exec(req.headers.cookie || ''); return m && m[1]; };

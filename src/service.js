@@ -507,6 +507,125 @@ function driverEarnings(db, driverId) {
   return { payableCents: payable, entries: entries.map((r) => ({ at: r.at, memo: r.memo, amountCents: -r.amount_cents, ref: r.ref })), runs, payouts };
 }
 
+// ---------- B6: driver weekly statement ----------
+function driverWeeklyStatement(db, driverId) {
+  // Group completed runs by ISO week, return last 12 weeks
+  const runs = db.prepare("SELECT id,service_date,payout_cents,bonus_cents FROM runs WHERE driver_id=? AND status='completed' ORDER BY service_date DESC LIMIT 200").all(driverId);
+  const weeks = {};
+  for (const r of runs) {
+    const d = new Date(r.service_date + 'T12:00:00Z');
+    // ISO week: Monday start
+    const day = d.getUTCDay() || 7;
+    const monday = new Date(d); monday.setUTCDate(d.getUTCDate() - day + 1);
+    const wk = monday.toISOString().slice(0, 10);
+    if (!weeks[wk]) weeks[wk] = { weekStart: wk, runCount: 0, earningsCents: 0, bonusCents: 0 };
+    weeks[wk].runCount++;
+    weeks[wk].earningsCents += r.payout_cents;
+    weeks[wk].bonusCents += r.bonus_cents || 0;
+  }
+  const payouts = db.prepare("SELECT at, amount_cents, holdback_cents, status FROM payouts WHERE driver_id=? ORDER BY id DESC LIMIT 12").all(driverId);
+  return { weeks: Object.values(weeks).sort((a, b) => b.weekStart.localeCompare(a.weekStart)).slice(0, 12), payouts };
+}
+
+// ---------- B7: cancel order with ledger refund ----------
+function cancelOrder(db, region, orderId, actorKind, actorId, reason) {
+  return tx(db, () => {
+    const SM = require('./statemachine');
+    const o = getOrder(db, orderId);
+    SM.assertMove(o.status, 'cancelled');
+    // Refund any escrow for this order
+    const escrow = -L.balance(db, `escrow:order:${o.id}`);
+    if (escrow > 0) {
+      L.post(db, region.id, 'cancel refund', `order:${o.id}`, [
+        { account: `escrow:order:${o.id}`, amount: escrow },
+        { account: 'refund_due', amount: -escrow },
+      ]);
+    }
+    SM.assertMove(o.status, 'cancelled'); // re-check (assertMove mutates nothing, just validates)
+    db.prepare("UPDATE orders SET status='cancelled', updated_at=? WHERE id=?").run(clock.now(), o.id);
+    log(db, region.id, 'order', o.id, 'cancelled', `${actorKind}:${actorId}`, { reason, refundCents: escrow });
+    return { orderId: o.id, refundCents: escrow };
+  });
+}
+
+// ---------- D3: driver onboarding ----------
+function submitDocument(db, driverId, kind, fileRef) {
+  const KINDS = ['id', 'vehicle_reg', 'pdp', 'profile_photo'];
+  if (!KINDS.includes(kind)) throw err(400, `kind must be one of ${KINDS.join(', ')}`);
+  if (!fileRef) throw err(400, 'file_ref required');
+  db.prepare("DELETE FROM driver_documents WHERE driver_id=? AND kind=?").run(driverId, kind);
+  const id = db.prepare('INSERT INTO driver_documents (driver_id, kind, file_ref, status, uploaded_at) VALUES (?,?,?,?,?)').run(driverId, kind, fileRef, 'pending', clock.now()).lastInsertRowid;
+  return { id, kind, status: 'pending' };
+}
+
+function pendingApprovals(db) {
+  const drivers = db.prepare("SELECT id,name,phone,vehicle,status FROM drivers").all();
+  const docs = db.prepare("SELECT driver_id, kind, status FROM driver_documents").all();
+  const byDriver = {};
+  for (const d of docs) {
+    if (!byDriver[d.driver_id]) byDriver[d.driver_id] = [];
+    byDriver[d.driver_id].push({ kind: d.kind, status: d.status });
+  }
+  return drivers.filter(d => byDriver[d.id] && byDriver[d.id].some(doc => doc.status === 'pending'))
+    .map(d => ({ ...d, documents: byDriver[d.id] }));
+}
+
+function approveDriver(db, region, driverId, adminId, approve, note) {
+  const d = db.prepare('SELECT id FROM drivers WHERE id=?').get(driverId);
+  if (!d) throw err(404, 'driver not found');
+  const status = approve ? 'approved' : 'rejected';
+  db.prepare("UPDATE driver_documents SET status=?, reviewed_at=?, note=? WHERE driver_id=? AND status='pending'").run(status, clock.now(), note || null, driverId);
+  const action = approve ? 'driver_approved' : 'driver_rejected';
+  log(db, region.id, 'driver', driverId, action, `admin:${adminId}`, { note });
+  return { driverId, status };
+}
+
+// ---------- D4: proof of delivery photo (stand-in) ----------
+// Real photo upload: multipart POST to a file store. For now: client sends a URL/filename.
+// Logged to docs/GAPS.md — no real file storage connected.
+function recordDeliveryPhoto(db, region, orderId, driverId, photoRef) {
+  const o = getOrder(db, orderId);
+  if (o.status !== 'out_for_delivery') throw err(409, 'order not out for delivery');
+  db.prepare("UPDATE orders SET fail_reason=COALESCE(fail_reason,'') WHERE id=?").run(orderId); // no-op touch
+  log(db, region.id, 'order', orderId, 'photo_ref', `driver:${driverId}`, { photoRef });
+  return { ok: true, photoRef };
+}
+
+// ---------- G3: platform settings ----------
+function getSettings(db) {
+  return db.prepare('SELECT key, value, updated_at, updated_by FROM platform_settings ORDER BY key').all()
+    .map(r => ({ key: r.key, value: JSON.parse(r.value), updatedAt: r.updated_at, updatedBy: r.updated_by }));
+}
+
+function setSetting(db, region, key, value, adminId) {
+  if (!key || key.length > 80) throw err(400, 'invalid key');
+  const v = JSON.stringify(value);
+  db.prepare('INSERT INTO platform_settings (key,value,updated_at,updated_by) VALUES (?,?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at,updated_by=excluded.updated_by').run(key, v, clock.now(), String(adminId));
+  log(db, region.id, 'settings', 0, 'setting_updated', `admin:${adminId}`, { key, value });
+  return { key, value };
+}
+
+// ---------- G4: disputes ----------
+function openDispute(db, region, orderId, reporter, reason) {
+  const o = getOrder(db, orderId);
+  const id = db.prepare('INSERT INTO disputes (order_id, reporter, reason, status, created_at) VALUES (?,?,?,?,?)').run(o.id, reporter, reason || null, 'open', clock.now()).lastInsertRowid;
+  log(db, region.id, 'order', o.id, 'dispute_opened', reporter, { reason });
+  return { id, orderId: o.id, status: 'open' };
+}
+
+function listDisputes(db, status = 'open') {
+  return db.prepare("SELECT d.*, o.status order_status FROM disputes d LEFT JOIN orders o ON o.id=d.order_id WHERE d.status=? ORDER BY d.id DESC LIMIT 100").all(status);
+}
+
+function resolveDispute(db, region, disputeId, adminId, note) {
+  const d = db.prepare('SELECT * FROM disputes WHERE id=?').get(disputeId);
+  if (!d) throw err(404, 'dispute not found');
+  if (d.status !== 'open') throw err(409, 'dispute already resolved');
+  db.prepare("UPDATE disputes SET status='resolved', resolved_at=?, note=? WHERE id=?").run(clock.now(), note || null, disputeId);
+  log(db, region.id, 'order', d.order_id, 'dispute_resolved', `admin:${adminId}`, { note });
+  return { id: disputeId, status: 'resolved' };
+}
+
 // ---------- admin helpers ----------
 function adminSuspendDriver(db, region, driverId) {
   const A = require('./auth');
@@ -538,4 +657,9 @@ module.exports = {
   walletBalance, walletTopup, walletStatement, walletPayOrder,
   createQuoteLink, previewQuoteLink, redeemQuoteLink,
   driverEarnings, adminSuspendDriver, notificationLog,
+  driverWeeklyStatement, cancelOrder,
+  submitDocument, pendingApprovals, approveDriver,
+  recordDeliveryPhoto,
+  getSettings, setSetting,
+  openDispute, listDisputes, resolveDispute,
 };
