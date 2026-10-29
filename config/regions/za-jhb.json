@@ -54,7 +54,9 @@
     "sizeClasses": { "small": 5, "medium": 15, "large": 40 },
     "confirmationExpiryDays": 3,
     "failedDeliveryMode": "same_day_return",
-    "deliveryCodeMaxAttempts": 5
+    "deliveryCodeMaxAttempts": 5,
+    "maxParcelPriceCents": 10000,
+    "quoteLinkTtlMs": 1800000
   },
   "hotspots": { "cellKm": 2, "perDriver": 3, "forecastWeight": 0.5, "minGap": 2, "bonus": 20, "dailyBonusCap": 500 },
   "payouts": { "holdbackPct": 10, "holdbackDays": 3 },

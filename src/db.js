@@ -38,6 +38,11 @@ CREATE INDEX IF NOT EXISTS ix_ledger_account ON ledger(account);
 CREATE TABLE IF NOT EXISTS pings (id INTEGER PRIMARY KEY, driver_id INTEGER, at INTEGER, lat REAL, lng REAL);
 CREATE TABLE IF NOT EXISTS hotspots (region_id TEXT, cell TEXT, score REAL, lat REAL, lng REAL, at INTEGER, PRIMARY KEY(region_id, cell));
 CREATE TABLE IF NOT EXISTS payouts (id INTEGER PRIMARY KEY, driver_id INTEGER, at INTEGER, amount_cents INTEGER, holdback_cents INTEGER, status TEXT);
+CREATE TABLE IF NOT EXISTS quote_links (
+  id INTEGER PRIMARY KEY, store_id INTEGER, token_hash TEXT NOT NULL UNIQUE, region_id TEXT NOT NULL,
+  quote_json TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'shopper', expires_at INTEGER NOT NULL,
+  used_at INTEGER, order_id INTEGER, created_at INTEGER);
+CREATE INDEX IF NOT EXISTS ix_quote_links_hash ON quote_links(token_hash);
 `;
 
 function open(file = ':memory:') {
@@ -45,6 +50,7 @@ function open(file = ':memory:') {
   const db = new DatabaseSync(file);
   db.exec(SCHEMA);
   require('./auth').initAuth(db);
+  require('./notify').initNotify(db);
   return db;
 }
 

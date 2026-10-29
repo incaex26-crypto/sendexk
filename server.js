@@ -47,6 +47,21 @@ function createApp({ db, regions }) {
   add('POST', '/api/driver/otp', ({ body, req }) => A.requestOtp(db, body.phone, req.headers['x-device-id'] || req.socket.remoteAddress));
   add('POST', '/api/driver/verify', ({ body }) => { const r = A.verifyOtp(db, body.phone, body.code); return { driverId: r.driverId, token: r.token }; });
 
+  // ---- driver earnings ----
+  add('GET', '/api/driver/earnings', ({ driver }) => S.driverEarnings(db, driver), { driver: true });
+
+  // ---- business wallet ----
+  // Sandbox: account identified by x-account-id header (real: phone OTP, see docs/GAPS.md)
+  const accountOf = (req) => { const id = Number(req.headers['x-account-id']); if (!id) throw S.err(401, 'x-account-id header required'); return id; };
+  add('GET', '/api/wallet', ({ region, req }) => { const id = accountOf(req); return { balanceCents: S.walletBalance(db, id), statement: S.walletStatement(db, id) }; });
+  add('POST', '/api/wallet/topup', ({ region, req, body }) => S.walletTopup(db, region, accountOf(req), Number(body.cents)));
+  add('POST', '/api/wallet/pay/:orderId', ({ region, req, params }) => { const r = S.walletPayOrder(db, region, +params.orderId, accountOf(req)); return { order: pub(r.order), confirmUrl: `/confirm.html?t=${r.confirmToken}` }; });
+
+  // ---- store checkout links ----
+  add('POST', '/api/store/quote', ({ region, body, req }) => S.createQuoteLink(db, region, body, Number(req.headers['x-store-id']) || null, body.mode || 'shopper'));
+  add('GET', '/api/store/pay/:token', ({ params }) => S.previewQuoteLink(db, params.token));
+  add('POST', '/api/store/pay/:token', ({ region, params, body }) => { const r = S.redeemQuoteLink(db, region, params.token, body); return { order: pub(r.order), confirmUrl: `/confirm.html?t=${r.confirmToken}` }; });
+
   // ---- admin ----
   add('POST', '/api/admin/login', ({ body, res }) => {
     const token = A.adminLogin(db, body.email, body.password);
@@ -60,6 +75,8 @@ function createApp({ db, regions }) {
   add('POST', '/api/admin/hotspots', ({ region }) => S.refreshHotspots(db, region), { admin: true });
   add('POST', '/api/admin/payouts', ({ region }) => S.runPayouts(db, region), { admin: true });
   add('GET', '/api/admin/orders/:id', ({ params }) => ({ order: pub(S.getOrder(db, +params.id)), events: db.prepare("SELECT * FROM events WHERE entity='order' AND entity_id=? ORDER BY id").all(+params.id) }), { admin: true });
+  add('POST', '/api/admin/drivers/:id/suspend', ({ region, params }) => { S.adminSuspendDriver(db, region, +params.id); return { ok: true }; }, { admin: true });
+  add('GET', '/api/admin/notifications', ({ params }) => S.notificationLog(db, null, Number(params.limit) || 100), { admin: true });
 
   const COOKIE = 'admin_session';
   const cookieOf = (req) => { const m = new RegExp(`(?:^|;\\s*)${COOKIE}=([0-9a-f]+)`).exec(req.headers.cookie || ''); return m && m[1]; };
