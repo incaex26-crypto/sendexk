@@ -1,10 +1,12 @@
-// Admin accounts, sessions, OTP codes and rate limits. All state is in SQLite so limits survive restarts.
+// Admin accounts, sessions, OTP codes, business sessions and store API keys.
+// All state is in SQLite so limits survive restarts.
 const crypto = require('node:crypto');
 const clock = require('./clock');
 const N = require('./notify');
 
 const MIN = 60_000, HOUR = 60 * MIN;
 const SESSION_TTL = 8 * HOUR, OTP_TTL = 10 * MIN, MAX_CODE_TRIES = 5;
+const BIZ_COOKIE = 'biz_session';
 
 const err = (status, message) => Object.assign(new Error(message), { status });
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
@@ -37,7 +39,9 @@ DROP TABLE sessions_v1;`);
 
   db.exec(`
 CREATE INDEX IF NOT EXISTS ix_sessions_subject ON sessions(kind, subject);
-CREATE INDEX IF NOT EXISTS ix_rate ON rate_limits(bucket, key, at);`);
+CREATE INDEX IF NOT EXISTS ix_rate ON rate_limits(bucket, key, at);
+CREATE TABLE IF NOT EXISTS api_keys (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, key_hash TEXT NOT NULL UNIQUE, name TEXT, created_at INTEGER, revoked_at INTEGER);
+CREATE INDEX IF NOT EXISTS ix_api_keys_hash ON api_keys(key_hash);`);
 }
 
 // ---- passwords: scrypt + random 16-byte salt, compared in constant time ----
@@ -152,6 +156,73 @@ function driverFromRequest(db, token, headerId) {
   return id;
 }
 
+// ---- business (account) OTP ----
+function requestBusinessOtp(db, phone, device) {
+  if (!phone) throw err(400, 'phone required');
+  const dev = String(device || 'unknown');
+  const p = windowCount(db, 'otp_phone', phone, 15 * MIN);
+  if (p.n >= 5) throw tooMany(p.oldest + 15 * MIN - clock.now());
+  const d = windowCount(db, 'otp_device', dev, HOUR);
+  if (d.n >= 20) throw tooMany(d.oldest + HOUR - clock.now());
+  hit(db, 'otp_phone', phone); hit(db, 'otp_device', dev);
+  const account = db.prepare('SELECT id FROM accounts WHERE phone=?').get(phone);
+  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+  if (account) {
+    db.prepare('DELETE FROM otp_codes WHERE phone=?').run(phone);
+    db.prepare('INSERT INTO otp_codes (phone, code_hash, created_at, expires_at) VALUES (?,?,?,?)').run(phone, sha(phone + ':' + code), clock.now(), clock.now() + OTP_TTL);
+    N.notify(db, { to: { role: 'business', id: account.id, phone }, kind: 'otp_code', data: { code } });
+  }
+  return { sent: true, devCode: N.devCodesVisible() ? code : undefined };
+}
+
+function verifyBusinessOtp(db, phone, code) {
+  const row = db.prepare('SELECT * FROM otp_codes WHERE phone=? ORDER BY id DESC LIMIT 1').get(phone);
+  if (!row || row.expires_at <= clock.now()) throw err(401, 'Code expired or not requested.');
+  if (sha(phone + ':' + code) !== row.code_hash) {
+    if (row.attempts + 1 >= MAX_CODE_TRIES) { db.prepare('DELETE FROM otp_codes WHERE id=?').run(row.id); throw err(401, 'Code is no longer valid. Request a new one.'); }
+    db.prepare('UPDATE otp_codes SET attempts=attempts+1 WHERE id=?').run(row.id);
+    throw err(401, 'Wrong code.');
+  }
+  db.prepare('DELETE FROM otp_codes WHERE id=?').run(row.id);
+  const account = db.prepare('SELECT id FROM accounts WHERE phone=?').get(phone);
+  if (!account) throw err(401, 'Wrong code.');
+  return { accountId: account.id, token: newSession(db, 'business', account.id) };
+}
+
+// ---- store API keys (raw key shown once; only hash is stored) ----
+function createStoreKey(db, accountId, name) {
+  const raw = crypto.randomBytes(32).toString('hex');
+  db.prepare('INSERT INTO api_keys (account_id, key_hash, name, created_at) VALUES (?,?,?,?)').run(accountId, sha(raw), name || 'default', clock.now());
+  const id = db.prepare('SELECT last_insert_rowid() AS id').get().id;
+  return { id, key: raw }; // raw key shown once, never stored
+}
+
+function keyToAccount(db, rawKey) {
+  if (!rawKey) return null;
+  const row = db.prepare('SELECT account_id, revoked_at FROM api_keys WHERE key_hash=?').get(sha(rawKey));
+  if (!row || row.revoked_at) return null;
+  return row.account_id;
+}
+
+function revokeKey(db, keyId, accountId) {
+  const r = db.prepare('UPDATE api_keys SET revoked_at=? WHERE id=? AND account_id=?').run(clock.now(), keyId, accountId);
+  if (r.changes !== 1) throw err(404, 'key not found');
+}
+
+/** Resolve a business request: session cookie, then API key header. */
+function businessFromRequest(db, cookieHeader, apiKey) {
+  const token = parseCookie(cookieHeader, BIZ_COOKIE);
+  if (token) {
+    const id = sessionSubject(db, 'business', token);
+    if (id) return id;
+  }
+  return keyToAccount(db, apiKey);
+}
+function parseCookie(header, name) {
+  const m = new RegExp(`(?:^|;\\s*)${name}=([0-9a-f]+)`).exec(header || '');
+  return m && m[1];
+}
+
 function cleanup(db) {
   const now = clock.now(), old = now - 24 * HOUR;
   db.prepare('DELETE FROM otp_codes WHERE expires_at<?').run(now);
@@ -160,4 +231,4 @@ function cleanup(db) {
   db.prepare('DELETE FROM locks WHERE until<?').run(now);
 }
 
-module.exports = { initAuth, createAdmin, adminLogin, sessionSubject, endSession, requestOtp, verifyOtp, suspendDriver, driverFromRequest, cleanup };
+module.exports = { initAuth, createAdmin, adminLogin, sessionSubject, endSession, requestOtp, verifyOtp, suspendDriver, driverFromRequest, requestBusinessOtp, verifyBusinessOtp, createStoreKey, keyToAccount, revokeKey, businessFromRequest, BIZ_COOKIE, cleanup };

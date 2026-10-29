@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="844" viewBox="0 0 390 844">
+  <rect width="390" height="844" fill="#EAF0F5"/>
+  <path d="M268 660 C 298 636, 352 648, 374 692 C 384 734, 342 764, 300 752 C 260 740, 246 690, 268 660Z" fill="#BFD8F0"/>
+  <rect x="14" y="372" width="112" height="66" rx="12" fill="#D3E6D6"/>
+  <rect x="246" y="76" width="102" height="62" rx="12" fill="#D3E6D6"/>
+  <rect x="22" y="526" width="100" height="70" rx="12" fill="#D3E6D6"/>
+  <g stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linecap="round">
+    <path d="M0 60H390M0 150H390M0 330H390M0 420H390M0 510H390M0 600H390M0 690H390M0 780H390"/>
+    <path d="M70 0V844M150 0V844M310 0V844M30 0V844M350 0V844"/>
+    <path d="M0 200 L120 300 M270 420 L390 330 M180 600 L260 520"/>
+  </g>
+  <g stroke="#CBD5E1" stroke-width="12" fill="none" stroke-linecap="round">
+    <path d="M0 240H390"/>
+    <path d="M230 0V844"/>
+  </g>
+  <g stroke="#FFFFFF" stroke-width="9" fill="none" stroke-linecap="round">
+    <path d="M0 240H390"/>
+    <path d="M230 0V844"/>
+  </g>
+  <path d="M-20 560 C 100 480, 240 520, 410 430" stroke="#E2C879" stroke-width="14" fill="none" stroke-linecap="round"/>
+  <path d="M-20 560 C 100 480, 240 520, 410 430" stroke="#F8E9B8" stroke-width="10" fill="none" stroke-linecap="round"/>
+  <g font-family="Manrope, Arial, sans-serif" font-size="10" font-weight="700" fill="#6B7A8C" letter-spacing="1.4">
+    <text x="42" y="124">ROSEBANK</text>
+    <text x="246" y="124">BRYANSTON</text>
+    <text x="246" y="344">SANDTON</text>
+    <text x="40" y="366">ILLOVO</text>
+    <text x="30" y="624">PARKTOWN NORTH</text>
+    <text x="270" y="780">LAKE</text>
+  </g>
+</svg>

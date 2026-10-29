@@ -50,15 +50,30 @@ function createApp({ db, regions }) {
   // ---- driver earnings ----
   add('GET', '/api/driver/earnings', ({ driver }) => S.driverEarnings(db, driver), { driver: true });
 
+  // ---- business identity: phone OTP → cookie session, or API key header ----
+  add('POST', '/api/business/otp', ({ body, req }) => A.requestBusinessOtp(db, body.phone, req.headers['x-device-id'] || req.socket.remoteAddress));
+  add('POST', '/api/business/verify', ({ body, res }) => {
+    const r = A.verifyBusinessOtp(db, body.phone, body.code);
+    res.setHeader('set-cookie', `${A.BIZ_COOKIE}=${r.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+    return { accountId: r.accountId };
+  });
+  add('POST', '/api/business/logout', ({ req, res }) => {
+    const t = parseBizCookie(req);
+    if (t) A.endSession(db, t);
+    res.setHeader('set-cookie', `${A.BIZ_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
+    return { ok: true };
+  });
+  // API keys for stores (shown once, used as x-api-key header)
+  add('POST', '/api/store/keys', ({ req }) => { const id = bizOf(req); return A.createStoreKey(db, id, req.body && req.body.name); }, { biz: true });
+  add('DELETE', '/api/store/keys/:id', ({ req, params }) => { const id = bizOf(req); A.revokeKey(db, +params.id, id); return { ok: true }; }, { biz: true });
+
   // ---- business wallet ----
-  // Sandbox: account identified by x-account-id header (real: phone OTP, see docs/GAPS.md)
-  const accountOf = (req) => { const id = Number(req.headers['x-account-id']); if (!id) throw S.err(401, 'x-account-id header required'); return id; };
-  add('GET', '/api/wallet', ({ region, req }) => { const id = accountOf(req); return { balanceCents: S.walletBalance(db, id), statement: S.walletStatement(db, id) }; });
-  add('POST', '/api/wallet/topup', ({ region, req, body }) => S.walletTopup(db, region, accountOf(req), Number(body.cents)));
-  add('POST', '/api/wallet/pay/:orderId', ({ region, req, params }) => { const r = S.walletPayOrder(db, region, +params.orderId, accountOf(req)); return { order: pub(r.order), confirmUrl: `/confirm.html?t=${r.confirmToken}` }; });
+  add('GET', '/api/wallet', ({ req }) => { const id = bizOf(req); return { balanceCents: S.walletBalance(db, id), statement: S.walletStatement(db, id) }; }, { biz: true });
+  add('POST', '/api/wallet/topup', ({ region, req, body }) => S.walletTopup(db, region, bizOf(req), Number(body.cents)), { biz: true });
+  add('POST', '/api/wallet/pay/:orderId', ({ region, req, params }) => { const r = S.walletPayOrder(db, region, +params.orderId, bizOf(req)); return { order: pub(r.order), confirmUrl: `/confirm.html?t=${r.confirmToken}` }; }, { biz: true });
 
   // ---- store checkout links ----
-  add('POST', '/api/store/quote', ({ region, body, req }) => S.createQuoteLink(db, region, body, Number(req.headers['x-store-id']) || null, body.mode || 'shopper'));
+  add('POST', '/api/store/quote', ({ region, body, req }) => S.createQuoteLink(db, region, body, bizOf(req), body.mode || 'shopper'), { biz: true });
   add('GET', '/api/store/pay/:token', ({ params }) => S.previewQuoteLink(db, params.token));
   add('POST', '/api/store/pay/:token', ({ region, params, body }) => { const r = S.redeemQuoteLink(db, region, params.token, body); return { order: pub(r.order), confirmUrl: `/confirm.html?t=${r.confirmToken}` }; });
 
@@ -80,6 +95,8 @@ function createApp({ db, regions }) {
 
   const COOKIE = 'admin_session';
   const cookieOf = (req) => { const m = new RegExp(`(?:^|;\\s*)${COOKIE}=([0-9a-f]+)`).exec(req.headers.cookie || ''); return m && m[1]; };
+  const parseBizCookie = (req) => { const m = new RegExp(`(?:^|;\\s*)${A.BIZ_COOKIE}=([0-9a-f]+)`).exec(req.headers.cookie || ''); return m && m[1]; };
+  const bizOf = (req) => { const id = A.businessFromRequest(db, req.headers.cookie || '', req.headers['x-api-key']); if (!id) throw S.err(401, 'Business login required.'); return id; };
   A.cleanup(db); setInterval(() => A.cleanup(db), 3600_000).unref(); // hourly tidy-up of expired codes, sessions, limits
 
   function pub(o) { const { token_hash, code_hash, idem_key, ...rest } = o; return rest; }
@@ -92,6 +109,7 @@ function createApp({ db, regions }) {
         if (r.method !== req.method) continue;
         const m = r.re.exec(url.pathname); if (!m) continue;
         if (r.opts.admin && !A.sessionSubject(db, 'admin', cookieOf(req))) return send(res, 401, { error: 'Admin login required.' });
+        if (r.opts.biz && !A.businessFromRequest(db, req.headers.cookie || '', req.headers['x-api-key'])) return send(res, 401, { error: 'Business login required.' });
         let driver = null;
         if (r.opts.driver) {
           const auth = req.headers.authorization || '';
