@@ -1,42 +1,36 @@
 # SenDexk
 
-Same-day batched delivery for independent drivers in dense areas. One app, one database, one API.
-Needs **Node 22.5+**. No `npm install` (zero dependencies; uses built-in `node:sqlite`).
+Same-day batched delivery marketplace for independent drivers in Johannesburg.
+Businesses book, recipients confirm a map pin, drivers accept priced runs.
+Needs **Node 24+**. No `npm install` — zero production dependencies (uses built-in `node:sqlite`).
+
+## How to run
 
 ```
-npm test            # 35 tests: pricing, rules, full order flow, HTTP API
-npm run simulate    # a seeded full day (70 orders, 12 drivers) printed as a report
-npm run seed        # fill data/app.db with a morning of orders and drivers
-npm start           # http://localhost:3000  (admin key: dev-admin, driver ids 1-12 after seed)
+npm start           # http://localhost:3000  (admin key: dev-admin)
+npm run seed        # fill data/app.db with a morning of test orders and drivers
+npm run simulate    # print a full simulated day (70 orders, 12 drivers)
 npm run new-region -- za-cpt "Cape Town" -33.92 18.42 Africa/Johannesburg ZAR ZA
 ```
 
+## How to test
+
+```
+npm test            # unit + integration tests (must all pass before any commit)
+npm run journey     # full end-to-end HTTP journey test
+```
+
 ## Pages
-`/` book a delivery · `/confirm.html?t=...` recipient confirms with a map pin · `/driver.html` accept runs, scan, deliver · `/admin.html` dispatch, hotspots, payouts, ledger.
 
-## Where things live
-| File | Job |
-|---|---|
-| `config/regions/*.json` | Everything that differs by city: zones, vehicles, prices, cut-offs, rules. A new city is one file. |
-| `src/pricing.js` | Cost from the vehicle (fuel L/100km or kWh/100km), per-parcel split, quote cap, run profit check |
-| `src/batching.js` | Confirmed parcels to runs: group, split by stops/weight, sequence, hold unprofitable runs |
-| `src/statemachine.js` | The only list of legal order status changes |
-| `src/service.js` | Every action (book, pay, confirm, dispatch, accept, scan, payouts). API and simulator both call it |
-| `src/ledger.js` | Double-entry money in whole cents. Every transaction sums to zero |
-| `src/hotspots.js`, `src/eta.js`, `src/geo.js` | Demand-minus-supply cells, ETA windows, distance maths |
-| `src/sim.js` | The day simulator |
-| `server.js` | Plain `node:http` server and routes |
+`/` book · `/confirm.html?t=…` recipient confirms pin + gets delivery code ·
+`/track.html?id=…` live tracking · `/driver.html` accept runs and scan deliveries ·
+`/admin.html` overview, orders, drivers, ledger · `/business.html` wallet + API keys ·
+`/store-pay.html` store checkout link
 
-## What is real and what is a stand-in
-- **Real:** pricing, batching, state machine, confirmation tokens (hashed, expiring), delivery codes (attempt limit), idempotent booking, atomic run acceptance, ledger, payouts with holdback, hotspots, ETA, region config.
-- **Stand-in, replace before launch:**
-  - Payment: `POST /api/orders/:id/pay` is a mock. Replace with Paystack/PayFast checkout plus a signature-verified webhook that calls `markPaid`.
-  - Driver login: the `x-driver-id` header is not secure. Use phone OTP and signed sessions.
-  - SMS/WhatsApp: confirmation links are returned in the API response. Send them through a messaging provider.
-  - Admin: one shared key in `ADMIN_KEY`. Use real accounts.
-  - Maps: pages use a schematic SVG map. Swap in MapLibre + PMTiles; `geo.js` keeps haversine until you plug in OSRM behind `roadKm`.
-  - Prices in `za-jhb.json` are illustrative. Measure real fuel, power and wage costs first.
-  - Legal: driver status, liability caps, holding customer money and VAT need review before real money moves.
+## Docs
 
-## For beginners and agents
-Start with `docs/00_START_HERE.md`. Agents: read `CLAUDE.md`, then `docs/PROGRESS.md`.
+- `docs/SPEC.md` — project brief, how a day works, full feature list and status
+- `docs/DECISIONS.md` — settled choices, open questions, store rate check table
+- `docs/PROGRESS.md` — current state, known gaps, next steps
+- `docs/DESIGN.md` — design tokens, banned words, component patterns
+- `CLAUDE.md` — rules for agents working on this repo
