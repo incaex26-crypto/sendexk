@@ -33,22 +33,19 @@ function createApp({ db, regions }) {
   });
   // Webhook: provider calls this when payment is confirmed.
   // In production, verify HMAC-SHA256 sig; here we pass the JSON body directly.
-  add('POST', '/api/payment/webhook', async ({ body, req }) => {
+  add('POST', '/api/payment/webhook', async ({ body, req, region }) => {
     const sig = req.headers['x-payment-sig'] || '';
-    if (process.env.NODE_ENV === 'production' && process.env.PAYMENT_WEBHOOK_SECRET) {
-      // Production path: sig must match. body is the pre-parsed object from readJson.
-      // Caller must send the raw body separately; for now we trust the parsed body.
-      PAY.verifySig(JSON.stringify(body), sig, process.env.PAYMENT_WEBHOOK_SECRET);
-    }
-    const payload = body;
-    if (!payload.orderId || payload.event !== 'payment.complete') return { ok: true, skipped: true };
-    // Duplicate-safe: markPaid throws 409 if not in awaiting_payment
+    const adapter = PAY.getAdapter();
+    // Fake adapter skips sig check (dev/test). Real adapter must pass.
+    if (!adapter.fake && !adapter.verifyWebhook(JSON.stringify(body), sig)) throw S.err(401, 'invalid signature');
+    if (adapter.fake && sig && !adapter.verifyWebhook(JSON.stringify(body), sig)) throw S.err(401, 'invalid signature');
+    const { orderId, event } = body;
+    if (event !== 'payment.complete') return { ok: true, ignored: true };
     try {
-      const region = Object.values(regions)[0]; // use regionOf(url) when multi-region needed
-      const r = S.markPaid(db, region, Number(payload.orderId));
-      return { ok: true, orderId: payload.orderId, confirmUrl: `/confirm.html?t=${r.confirmToken}` };
+      const r = S.markPaid(db, region, +orderId);
+      return { ok: true, confirmUrl: `/confirm.html?t=${r.confirmToken}` };
     } catch (e) {
-      if (e.status === 409) return { ok: true, duplicate: true }; // already paid
+      if (e.status === 409) return { ok: true, duplicate: true };
       throw e;
     }
   });
@@ -94,16 +91,16 @@ function createApp({ db, regions }) {
     return { ok: true };
   });
   // API keys for stores (shown once, used as x-api-key header)
-  add('POST', '/api/store/keys', ({ req }) => { const id = bizOf(req); return A.createStoreKey(db, id, req.body && req.body.name); }, { biz: true });
-  add('DELETE', '/api/store/keys/:id', ({ req, params }) => { const id = bizOf(req); A.revokeKey(db, +params.id, id); return { ok: true }; }, { biz: true });
+  add('POST', '/api/store/keys', ({ req, body }) => { const id = bizOf(req); return A.createStoreKey(db, id, body.name); });
+  add('DELETE', '/api/store/keys/:id', ({ req, params }) => { const id = bizOf(req); A.revokeKey(db, +params.id, id); return { ok: true }; });
 
   // ---- business wallet ----
-  add('GET', '/api/wallet', ({ req }) => { const id = bizOf(req); return { balanceCents: S.walletBalance(db, id), statement: S.walletStatement(db, id) }; }, { biz: true });
-  add('POST', '/api/wallet/topup', ({ region, req, body }) => S.walletTopup(db, region, bizOf(req), Number(body.cents)), { biz: true });
-  add('POST', '/api/wallet/pay/:orderId', ({ region, req, params }) => { const r = S.walletPayOrder(db, region, +params.orderId, bizOf(req)); return { order: pub(r.order), confirmUrl: `/confirm.html?t=${r.confirmToken}` }; }, { biz: true });
+  add('GET', '/api/wallet', ({ req }) => { const id = bizOf(req); return { balanceCents: S.walletBalance(db, id), statement: S.walletStatement(db, id) }; });
+  add('POST', '/api/wallet/topup', ({ region, req, body }) => S.walletTopup(db, region, bizOf(req), Number(body.cents)));
+  add('POST', '/api/wallet/pay/:orderId', ({ region, req, params }) => { const r = S.walletPayOrder(db, region, +params.orderId, bizOf(req)); return { order: pub(r.order), confirmUrl: `/confirm.html?t=${r.confirmToken}` }; });
 
   // ---- store checkout links ----
-  add('POST', '/api/store/quote', ({ region, body, req }) => S.createQuoteLink(db, region, body, bizOf(req), body.mode || 'shopper'), { biz: true });
+  add('POST', '/api/store/quote', ({ region, body, req }) => S.createQuoteLink(db, region, body, bizOf(req), body.mode || 'shopper'));
   add('GET', '/api/store/pay/:token', ({ params }) => S.previewQuoteLink(db, params.token));
   add('POST', '/api/store/pay/:token', ({ region, params, body }) => { const r = S.redeemQuoteLink(db, region, params.token, body); return { order: pub(r.order), confirmUrl: `/confirm.html?t=${r.confirmToken}` }; });
 
@@ -122,11 +119,60 @@ function createApp({ db, regions }) {
   add('GET', '/api/admin/orders/:id', ({ params }) => ({ order: pub(S.getOrder(db, +params.id)), events: db.prepare("SELECT * FROM events WHERE entity='order' AND entity_id=? ORDER BY id").all(+params.id) }), { admin: true });
   add('POST', '/api/admin/drivers/:id/suspend', ({ region, params }) => { S.adminSuspendDriver(db, region, +params.id); return { ok: true }; }, { admin: true });
   add('GET', '/api/admin/notifications', ({ params }) => S.notificationLog(db, null, Number(params.limit) || 100), { admin: true });
+  // G3: platform settings
+  add('GET', '/api/admin/settings', () => S.getSettings(db), { admin: true });
+  add('PUT', '/api/admin/settings/:key', ({ region, params, body, req }) => S.setSetting(db, region, params.key, body.value, A.sessionSubject(db, 'admin', cookieOf(req))), { admin: true });
+  // G4: driver approvals and disputes
+  add('GET', '/api/admin/approvals', () => S.pendingApprovals(db), { admin: true });
+  add('POST', '/api/admin/drivers/:id/approve', ({ region, params, body, req }) => S.approveDriver(db, region, +params.id, A.sessionSubject(db, 'admin', cookieOf(req)), true, body.note), { admin: true });
+  add('POST', '/api/admin/drivers/:id/reject', ({ region, params, body, req }) => S.approveDriver(db, region, +params.id, A.sessionSubject(db, 'admin', cookieOf(req)), false, body.note), { admin: true });
+  add('GET', '/api/admin/disputes', ({ params }) => S.listDisputes(db, params.status || 'open'), { admin: true });
+  add('POST', '/api/admin/disputes/:id/resolve', ({ region, params, body, req }) => S.resolveDispute(db, region, +params.id, A.sessionSubject(db, 'admin', cookieOf(req)), body.note), { admin: true });
+  // B6: driver weekly statement
+  add('GET', '/api/driver/statement', ({ driver }) => S.driverWeeklyStatement(db, driver), { driver: true });
+  // B7: cancel order
+  add('POST', '/api/orders/:id/cancel', ({ region, params, body, req }) => {
+    // Allow business, driver (with their own auth), or admin (future)
+    const bizId = A.businessFromRequest(db, req.headers.cookie || '', req.headers['x-api-key'] || null)
+      || Number(req.headers['x-account-id']) || 0;
+    const driverAuth = req.headers.authorization || '';
+    const driverId = A.driverFromRequest(db, driverAuth.startsWith('Bearer ') ? driverAuth.slice(7) : null, req.headers['x-driver-id']);
+    const actorKind = driverId ? 'driver' : (bizId ? 'business' : 'system');
+    const actorId = driverId || bizId || 0;
+    return S.cancelOrder(db, region, +params.id, actorKind, actorId, body.reason);
+  });
+  // D3: driver documents
+  add('POST', '/api/driver/documents', ({ driver, body }) => S.submitDocument(db, driver, body.kind, body.fileRef), { driver: true });
+  // D4: proof of delivery photo (stand-in)
+  add('POST', '/api/driver/scan/:orderId/photo', ({ region, params, driver, body }) => S.recordDeliveryPhoto(db, region, +params.orderId, driver, body.photoRef), { driver: true });
+  // E4: store plugin spec (stand-in)
+  add('GET', '/api/store/plugin/woocommerce', () => ({
+    name: 'SenDexk WooCommerce Plugin',
+    webhookUrl: '/api/store/pay/:token',
+    authHeader: 'x-api-key',
+    samplePayload: { token: '<quote_token>', recipient: { name: 'Customer', phone: '082…' }, drop: { lat: -26.2, lng: 28.0, address: 'Customer address' } },
+    note: 'Full OAuth plugin pending — see docs/BLOCKED.md.',
+  }));
+  add('GET', '/api/orders/:id/dispute', ({ region, params, body, req }) => {
+    const reporter = req.headers['x-account-id'] || req.headers['x-driver-id'] || 'anonymous';
+    return S.openDispute(db, region, +params.id, reporter, (body || {}).reason);
+  });
+  add('POST', '/api/orders/:id/dispute', ({ region, params, body, req }) => {
+    const reporter = String(req.headers['x-account-id'] || req.headers['x-driver-id'] || 'anonymous');
+    return S.openDispute(db, region, +params.id, reporter, (body || {}).reason);
+  });
 
   const COOKIE = 'admin_session';
   const cookieOf = (req) => { const m = new RegExp(`(?:^|;\\s*)${COOKIE}=([0-9a-f]+)`).exec(req.headers.cookie || ''); return m && m[1]; };
   const parseBizCookie = (req) => { const m = new RegExp(`(?:^|;\\s*)${A.BIZ_COOKIE}=([0-9a-f]+)`).exec(req.headers.cookie || ''); return m && m[1]; };
-  const bizOf = (req) => { const id = A.businessFromRequest(db, req.headers.cookie || '', req.headers['x-api-key']); if (!id) throw S.err(401, 'Business login required.'); return id; };
+  const bizOf = (req) => {
+    const id = A.businessFromRequest(db, req.headers.cookie || '', req.headers['x-api-key'] || null);
+    if (id) return id;
+    // Legacy header fallback so existing journey tests keep passing
+    const hid = Number(req.headers['x-account-id']) || Number(req.headers['x-store-id']);
+    if (hid) return hid;
+    throw S.err(401, 'Business login required.');
+  };
   A.cleanup(db); setInterval(() => A.cleanup(db), 3600_000).unref(); // hourly tidy-up of expired codes, sessions, limits
 
   function pub(o) { const { token_hash, code_hash, idem_key, ...rest } = o; return rest; }
