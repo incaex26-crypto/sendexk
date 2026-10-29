@@ -12,6 +12,7 @@
     "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\"",
     "simulate": "node --disable-warning=ExperimentalWarning scripts/simulate.js",
     "new-region": "node scripts/new-region.js",
-    "get-map": "node scripts/get-map.js"
+    "get-map": "node scripts/get-map.js",
+    "journey": "DEV=1 node --disable-warning=ExperimentalWarning --test test/journey.test.js"
   }
 }

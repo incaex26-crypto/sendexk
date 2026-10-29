@@ -1,11 +1,26 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Driver</title>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Driver — SenDexk</title>
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--line);margin-bottom:12px}
+.tab{padding:.5rem 1rem;cursor:pointer;border:none;background:none;color:var(--mute);border-bottom:2px solid transparent;font:inherit}
+.tab.active{color:var(--brand);border-bottom-color:var(--brand)}
+.earn-row td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+</style>
 </head><body>
-<h1>Driver</h1><nav><a href="/">Book</a><a href="/driver.html">Driver</a><a href="/admin.html">Admin</a></nav>
-<div class="card"><label>Driver id (starter login; use phone OTP in production)</label><div class="row"><input id="did" type="number" value="1"><button id="go">Open</button></div></div>
+<h1>Driver</h1><nav><a href="/">Book</a> <a href="/driver.html">Driver</a> <a href="/admin.html">Admin</a></nav>
+<div class="card"><label>Driver ID (starter — use phone OTP on next release)</label><div class="row"><input id="did" type="number" value="1"><button id="go">Open</button></div></div>
+<div class="tabs">
+  <button class="tab active" data-tab="runs" onclick="switchTab('runs')">Runs</button>
+  <button class="tab" data-tab="earnings" onclick="switchTab('earnings')">Earnings</button>
+</div>
+<div id="tab-runs">
 <div id="run-map" style="width:100%;height:320px;display:none;border-radius:8px;overflow:hidden;margin:1rem 0;position:relative"></div>
 <div id="me"></div><div id="runs"></div>
+</div>
+<div id="tab-earnings" style="display:none">
+<div id="earn-content"><p class="mute">Open your driver profile first.</p></div>
+</div>
 
 <script src="app.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
@@ -119,4 +134,31 @@ else if(p.status==='out_for_delivery')el.innerHTML=`<input placeholder="Recipien
 else if(p.status==='failed')el.innerHTML=`<button data-x="return">Returned to sender</button>`;
 el.querySelectorAll('[data-x]').forEach(b=>b.onclick=async()=>{const a=b.dataset.x,body={action:a};if(a==='deliver')body.code=$('#c'+p.id).value;if(a==='fail')body.reason='recipient unreachable';
 try{await api('POST','/api/driver/scan/'+p.id,body,H);load()}catch(e){alert(e.message)}})}
+
+function switchTab(tab){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));
+  $('#tab-runs').style.display=tab==='runs'?'':'none';
+  $('#tab-earnings').style.display=tab==='earnings'?'':'none';
+  if(tab==='earnings')loadEarnings();
+}
+
+async function loadEarnings(){
+  if(!Object.keys(H).length){$('#earn-content').innerHTML='<p class="mute">Open your driver profile first.</p>';return;}
+  try{
+    const e=await api('GET','/api/driver/earnings',null,H);
+    const fmt=(c)=>'R'+(c/100).toFixed(2);
+    let html=`<div class="card" style="text-align:center"><div class="big" style="color:var(--blue-light)">${fmt(e.payableCents)}</div><div class="mute">Available to pay out</div></div>`;
+    if(e.runs.length){
+      html+=`<div class="card"><h2>Recent runs</h2><table><thead><tr><th>Date</th><th>Distance</th><th>Pay</th><th>Bonus</th></tr></thead><tbody>`;
+      html+=e.runs.map(r=>`<tr class="earn-row"><td>${r.service_date||'—'}</td><td>${r.km?r.km.toFixed(1)+' km':'—'}</td><td>${fmt(r.payout_cents)}</td><td>${r.bonus_cents?fmt(r.bonus_cents):'—'}</td></tr>`).join('');
+      html+=`</tbody></table></div>`;
+    }
+    if(e.payouts.length){
+      html+=`<div class="card"><h2>Payout history</h2><table><thead><tr><th>Date</th><th>Paid</th><th>Held</th><th>Status</th></tr></thead><tbody>`;
+      html+=e.payouts.map(p=>`<tr class="earn-row"><td>${fmtDate(new Date(p.at).toISOString())}</td><td>${fmt(p.amount_cents)}</td><td>${fmt(p.holdback_cents)}</td><td>${p.status}</td></tr>`).join('');
+      html+=`</tbody></table><p class="mute" style="font-size:.8rem">10% is held for 3 days then released automatically.</p></div>`;
+    }
+    $('#earn-content').innerHTML=html;
+  }catch(e){$('#earn-content').innerHTML=`<p class="err">${e.message}</p>`;}
+}
 </script></body></html>

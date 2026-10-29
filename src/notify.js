@@ -5,16 +5,16 @@
 const clock = require('./clock');
 const TEMPLATES = require('./templates');
 
-const DEFAULT_ORDER = { driver: ['sms', 'email'], customer: ['whatsapp', 'email'], business: ['email', 'whatsapp'] };
+const DEFAULT_ORDER = { driver: ['sms', 'email'], customer: ['whatsapp', 'sms', 'email'], business: ['email', 'whatsapp'] };
 const outbox = []; // in-memory copy for tests
 
 function fakeAdapter(channel) {
   return {
     fake: true,
-    send({ address, from, body }) {
+    send({ address, from, body, kind }) {
       if (!address) return { ok: false, reason: 'no address' };
       const id = `fake-${channel}-${outbox.length + 1}`;
-      outbox.push({ id, channel, address, from, body });
+      outbox.push({ id, channel, address, from, body, kind });
       return { ok: true, id };
     },
   };
@@ -63,7 +63,7 @@ function notify(db, { to, kind, data = {} }) {
     let res;
     if (r.reason) res = { ok: false, reason: r.reason };
     else {
-      try { res = adapters[channel].send({ address: r.address, from: r.from, body }); }
+      try { res = adapters[channel].send({ address: r.address, from: r.from, body, kind }); }
       catch (e) { res = { ok: false, reason: e.message }; }
     }
     log.run(clock.now(), to.role, ref, kind, channel, r.address || null, r.from || null, res.ok ? 1 : 0, res.reason || null, res.id || null);

@@ -47,4 +47,32 @@ All of `docs/`, `CLAUDE.md`, `AGENTS.md`, `.claude/commands/`, `.github/workflow
 - Admin key is gone. Create an admin: `ADMIN_PASSWORD='...' node scripts/create-admin.js you@example.com`. Login screen is in `public/admin.html`.
 - Driver routes accept `Authorization: Bearer <token>` from `/api/driver/otp` + `/api/driver/verify`; the old `x-driver-id` header still works (dev only) but suspended drivers are refused.
 - OTP code is returned as `devCode` outside production; a real SMS provider is still to be chosen.
-- No admin UI button for suspending yet (call `suspendDriver`). Tests: `test/auth.test.js`.
+- Tests: `test/auth.test.js`.
+
+## Ecosystem build — stage 1 & 2 (done, branch feat/ecosystem, PR open)
+**PR open — do not merge without review.**
+
+74 tests pass, including new `test/journey.test.js` (2 tests: A→G journey + schema upgrade).
+
+### What was built
+- **Business wallet** (`src/service.js`): `walletTopup`, `walletBalance`, `walletStatement`, `walletPayOrder`. Double-entry ledger; every transaction balances to zero.
+- **Store checkout links** (`src/service.js`, `src/db.js`): `createQuoteLink`, `previewQuoteLink`, `redeemQuoteLink`. Token expires in 30 min; one-time use; shopper-pays and wallet-mode.
+- **Driver earnings** (`/api/driver/earnings`): ledger entries, run history, payout history.
+- **Admin suspend** (`/api/admin/drivers/:id/suspend`): logs driver out everywhere immediately.
+- **Notification log** (`/api/admin/notifications`): full outbox readable by admin.
+- **Notifications wired** into `markPaid` (payment_received, booking_confirmed), `acceptRun` (driver_assigned), and scan actions (out_for_delivery, delivered).
+- **UI pages**: `public/business.html` (wallet + statement), `public/pay.html` (store checkout map), driver earnings tab, admin drivers + notifications tabs.
+- `npm run journey` runs the A→G journey test in DEV mode.
+- `docs/GAPS.md` documents 7 production shortcuts.
+
+### Gaps (see docs/GAPS.md)
+1. Business identity uses `x-account-id` header — needs real phone OTP login.
+2. Payment is sandbox only — no real payment provider.
+3. SMS / WhatsApp adapters are fake — adapters need real API keys.
+4. Map tiles require manual download.
+5. Admin password set in plaintext on command line.
+6. Pricing values are illustrative (need field data).
+7. Driver location is polled, not pushed.
+
+## Next step (one action)
+Review and merge PR `feat/ecosystem` on GitHub. After merge, the next task from the backlog is T3 (Recipient map-pin confirmation flow) or T4 (Driver phone OTP login).

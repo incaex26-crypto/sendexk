@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Confirm delivery — SenDexk</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+#map-wrap{width:100%;height:320px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card);position:relative;margin:10px 0}
+#map-fallback{display:none;padding:14px;text-align:center;color:var(--mute)}
+.price-box{background:var(--card);border:2px solid var(--brand);border-radius:10px;padding:14px;margin:10px 0;text-align:center}
+.price-box .num{font-size:2rem;font-weight:700;color:var(--brand)}
+#section-confirm,#section-done,#section-expired{display:none}
+</style>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin></script>
+<script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js" integrity="sha384-QfbOCebHNw8pQiPAOd2IFee2v2A5VYZxBk0+JGZ5H+3mfzVIp6zsQNkTsfGJot93" crossorigin></script>
+</head>
+<body>
+<nav><a href="/">Book</a> <a href="/track.html">Track</a></nav>
+
+<div id="section-loading">
+  <div class="card"><p class="mute">Loading your delivery details…</p></div>
+</div>
+<div id="section-expired">
+  <div class="card">
+    <h1>Link expired</h1>
+    <p>This delivery link has expired. Return to the store to choose delivery again.</p>
+  </div>
+</div>
+<div id="section-confirm">
+  <h1>Confirm your delivery</h1>
+  <div class="card">
+    <div class="mute">Delivering to</div>
+    <div id="drop-addr" style="font-weight:600;margin:.3rem 0"></div>
+    <div id="store-info" class="mute"></div>
+  </div>
+  <div id="map-wrap"><div id="map" style="width:100%;height:100%"></div><div id="map-fallback">Map unavailable — drag the pin or use GPS below.</div></div>
+  <p class="mute" style="font-size:.85rem">Drag the pin to your exact door, or tap <strong>Use my location</strong>.</p>
+  <button class="alt" id="btn-gps" style="width:auto;padding:.4rem .9rem;margin-bottom:4px">Use my location</button>
+  <div class="price-box">
+    <div class="mute">You pay</div>
+    <div class="num" id="price-display">—</div>
+    <div class="mute" style="font-size:.8rem">This is the maximum — you may be charged less.</div>
+  </div>
+  <button id="btn-pay">Confirm location and pay</button>
+  <p id="pay-msg" class="err"></p>
+</div>
+<div id="section-done">
+  <div class="card">
+    <h2>Payment confirmed</h2>
+    <p>Your delivery is booked. The recipient will receive a confirmation link to verify the drop-off point.</p>
+    <a id="track-link" href="/track.html" style="color:var(--brand)">Track your delivery →</a>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+<script>
+const token = new URLSearchParams(location.search).get('t');
+let pinLat = null, pinLng = null, mapInst = null;
+
+function show(id) {
+  ['section-loading','section-expired','section-confirm','section-done'].forEach((s) => {
+    document.getElementById(s).style.display = s === id ? '' : 'none';
+  });
+}
+
+async function init() {
+  if (!token) { show('section-expired'); return; }
+  let spec;
+  try { spec = await api('GET', `/api/store/pay/${token}`); }
+  catch (e) {
+    if (e.status === 410 || e.status === 409) { show('section-expired'); return; }
+    show('section-expired'); return;
+  }
+  pinLat = spec.spec.drop?.lat ?? -26.1;
+  pinLng = spec.spec.drop?.lng ?? 28.05;
+  $('#drop-addr').textContent = spec.spec.drop?.address || 'Drop-off address';
+  $('#store-info').textContent = spec.storeId ? `Store order` : 'Standard delivery';
+  // Price: re-quote to show
+  try {
+    const region = await api('GET', '/api/region');
+    const q = await api('POST', '/api/quote', { pickup: spec.spec.pickup, drop: spec.spec.drop, vehicleClass: spec.spec.vehicleClass || 'car' });
+    $('#price-display').textContent = 'R' + (q.cap / 100).toFixed(2);
+  } catch { $('#price-display').textContent = '—'; }
+  show('section-confirm');
+  // Map
+  try {
+    const region = await api('GET', '/api/region');
+    mapInst = tileMap($('#map'), region, {
+      height: 320,
+      center: [pinLng, pinLat],
+      zoom: 15,
+      markers: [{ lng: pinLng, lat: pinLat, color: '#ef4444', draggable: true }],
+    });
+    if (mapInst) {
+      mapInst.map.on('mousedown', () => {});
+    }
+  } catch { $('#map-fallback').style.display = ''; }
+}
+
+$('#btn-gps').addEventListener('click', () => {
+  if (!navigator.geolocation) { $('#pay-msg').textContent = 'GPS not available.'; return; }
+  navigator.geolocation.getCurrentPosition((pos) => {
+    pinLat = pos.coords.latitude; pinLng = pos.coords.longitude;
+  });
+});
+
+$('#btn-pay').addEventListener('click', async () => {
+  $('#btn-pay').disabled = true; $('#pay-msg').textContent = '';
+  try {
+    const body = {};
+    if (pinLat && pinLng) { body.lat = pinLat; body.lng = pinLng; }
+    const r = await api('POST', `/api/store/pay/${token}`, body);
+    if (r.order) {
+      $('#track-link').href = `/track.html?id=${r.order.id}`;
+      show('section-done');
+    }
+  } catch (e) {
+    $('#pay-msg').textContent = e.message || 'Payment failed. Please try again.';
+    $('#btn-pay').disabled = false;
+  }
+});
+
+init();
+</script>
+</body>
+</html>

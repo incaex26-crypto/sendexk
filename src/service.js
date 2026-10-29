@@ -135,6 +135,8 @@ function markPaid(db, region, orderId, amountCents) {
     L.payIn(db, region.id, o.id, o.account_id, o.cap_cents);
     const t = C.newToken();
     const upd = moveOrder(db, o, 'awaiting_confirmation', { token_hash: t.hash, token_expires: clock.now() + region.rules.confirmationExpiryDays * DAY }, 'payment', 'paid');
+    tell(db, upd, 'payment_received');
+    tell(db, upd, 'booking_confirmed');
     return { order: upd, confirmToken: t.token }; // token is texted to the recipient, never stored in clear
   });
 }
@@ -254,6 +256,7 @@ function acceptRun(db, region, runId, driverId) {
     if (view.bonusCents) L.bonus(db, region.id, driverId, view.bonusCents, runId);
     db.prepare("UPDATE drivers SET status='on_run' WHERE id=?").run(driverId);
     log(db, region.id, 'run', runId, 'accepted', `driver:${driverId}`, { payout: view.payoutCents, bonus: view.bonusCents, tier: view.tier });
+    for (const o of db.prepare('SELECT * FROM orders WHERE run_id=?').all(runId)) tell(db, o, 'driver_assigned');
     return { run: db.prepare('SELECT * FROM runs WHERE id=?').get(runId), view };
   });
 }
@@ -411,6 +414,110 @@ function releaseHoldbacks(db, region) {
   });
 }
 
+// ---------- business wallet ----------
+const walletAccount = (id) => `wallet:${id}`;
+const walletBalance = (db, accountId) => -L.balance(db, walletAccount(accountId));
+
+function walletTopup(db, region, accountId, cents) {
+  if (!Number.isInteger(cents) || cents <= 0) throw err(400, 'amount must be a positive whole number of cents');
+  return tx(db, () => {
+    L.post(db, region.id, 'wallet topup', `account:${accountId}`, [
+      { account: 'bank', amount: cents },
+      { account: walletAccount(accountId), amount: -cents },
+    ]);
+    log(db, region.id, 'account', accountId, 'wallet_topup', 'account', { cents });
+    return { balanceCents: walletBalance(db, accountId) };
+  });
+}
+
+function walletStatement(db, accountId, limit = 50) {
+  const rows = db.prepare('SELECT * FROM ledger WHERE account=? ORDER BY id DESC LIMIT ?').all(walletAccount(accountId), limit);
+  let running = 0;
+  return rows.reverse().map((r) => {
+    running += -r.amount_cents;
+    return { at: r.at, memo: r.memo, amountCents: -r.amount_cents, balanceCents: running, ref: r.ref };
+  }).reverse();
+}
+
+function walletPayOrder(db, region, orderId, accountId) {
+  return tx(db, () => {
+    const o = getOrder(db, orderId);
+    if (o.account_id !== accountId) throw err(403, 'not your order');
+    if (o.status !== 'awaiting_payment') throw err(409, `order is ${o.status}`);
+    const avail = walletBalance(db, accountId);
+    if (avail < o.cap_cents) throw err(402, `Wallet balance R${(avail / 100).toFixed(2)} is below the cap R${(o.cap_cents / 100).toFixed(2)}. Please top up.`);
+    L.post(db, region.id, 'wallet payment', `order:${orderId}`, [
+      { account: walletAccount(accountId), amount: o.cap_cents },
+      { account: `escrow:order:${orderId}`, amount: -o.cap_cents },
+    ]);
+    const t = C.newToken();
+    const upd = moveOrder(db, o, 'awaiting_confirmation', { token_hash: t.hash, token_expires: clock.now() + region.rules.confirmationExpiryDays * DAY }, 'wallet', 'paid');
+    return { order: upd, confirmToken: t.token };
+  });
+}
+
+// ---------- store checkout links ----------
+function createQuoteLink(db, region, body, storeId, mode = 'shopper') {
+  const maxCents = region.rules.maxParcelPriceCents || 10000;
+  const q = quote(region, body);
+  if (q.cap > maxCents) throw err(422, `Price R${(q.cap / 100).toFixed(2)} exceeds ceiling R${(maxCents / 100).toFixed(2)}.`);
+  const ttl = region.rules.quoteLinkTtlMs || 1800000;
+  const t = C.newToken();
+  db.prepare('INSERT INTO quote_links (store_id, token_hash, region_id, quote_json, mode, expires_at, created_at) VALUES (?,?,?,?,?,?,?)')
+    .run(storeId || null, t.hash, region.id, JSON.stringify(body), mode, clock.now() + ttl, clock.now());
+  return { token: t.token, expiresAt: clock.now() + ttl, quote: q };
+}
+
+function previewQuoteLink(db, token) {
+  const row = db.prepare('SELECT * FROM quote_links WHERE token_hash=?').get(C.hash(token || ''));
+  if (!row) throw err(404, 'link not found');
+  if (row.expires_at < clock.now()) throw err(410, 'This delivery link has expired. Return to the store to choose delivery again.');
+  if (row.used_at) throw err(409, 'This link has already been used.');
+  return { storeId: row.store_id, spec: JSON.parse(row.quote_json), mode: row.mode, expiresAt: row.expires_at };
+}
+
+function redeemQuoteLink(db, region, token, pinBody) {
+  // Each sub-operation has its own transaction; we cannot nest them.
+  const row = db.prepare('SELECT * FROM quote_links WHERE token_hash=?').get(C.hash(token || ''));
+  if (!row) throw err(404, 'link not found');
+  if (row.expires_at < clock.now()) throw err(410, 'This delivery link has expired. Return to the store to choose delivery again.');
+  if (row.used_at) throw err(409, 'This link has already been used.');
+  const spec = JSON.parse(row.quote_json);
+  if (pinBody?.lat && pinBody?.lng) spec.drop = { ...spec.drop, lat: pinBody.lat, lng: pinBody.lng };
+  const orderResult = createOrder(db, region, { ...spec, accountId: row.store_id || null }, null);
+  const o = orderResult.order;
+  let confirmToken;
+  if (row.mode === 'wallet' && row.store_id) {
+    const r = walletPayOrder(db, region, o.id, row.store_id);
+    confirmToken = r.confirmToken;
+  } else {
+    const r = markPaid(db, region, o.id);
+    confirmToken = r.confirmToken;
+  }
+  db.prepare('UPDATE quote_links SET used_at=?, order_id=? WHERE id=?').run(clock.now(), o.id, row.id);
+  return { order: getOrder(db, o.id), confirmToken };
+}
+
+// ---------- driver earnings ----------
+function driverEarnings(db, driverId) {
+  const entries = db.prepare("SELECT * FROM ledger WHERE account=? ORDER BY id DESC LIMIT 200").all(`driver_payable:${driverId}`);
+  const payable = -L.balance(db, `driver_payable:${driverId}`);
+  const runs = db.prepare("SELECT id, service_date, km, minutes, payout_cents, bonus_cents FROM runs WHERE driver_id=? AND status='completed' ORDER BY id DESC LIMIT 50").all(driverId);
+  const payouts = db.prepare("SELECT at, amount_cents, holdback_cents, status FROM payouts WHERE driver_id=? ORDER BY id DESC LIMIT 20").all(driverId);
+  return { payableCents: payable, entries: entries.map((r) => ({ at: r.at, memo: r.memo, amountCents: -r.amount_cents, ref: r.ref })), runs, payouts };
+}
+
+// ---------- admin helpers ----------
+function adminSuspendDriver(db, region, driverId) {
+  const A = require('./auth');
+  A.suspendDriver(db, driverId);
+  log(db, region.id, 'driver', driverId, 'suspended', 'admin', {});
+}
+
+function notificationLog(db, region, limit = 100) {
+  return db.prepare('SELECT * FROM notifications ORDER BY id DESC LIMIT ?').all(limit);
+}
+
 // ---------- admin ----------
 function overview(db, region) {
   const q = (s, ...a) => db.prepare(s).all(...a);
@@ -418,7 +525,7 @@ function overview(db, region) {
     date: today(region),
     orders: Object.fromEntries(q('SELECT status, COUNT(*) n FROM orders WHERE region_id=? GROUP BY status', region.id).map((r) => [r.status, r.n])),
     runs: Object.fromEntries(q('SELECT status, COUNT(*) n FROM runs WHERE region_id=? GROUP BY status', region.id).map((r) => [r.status, r.n])),
-    money: { revenue: -L.balance(db, 'platform_revenue'), messaging: -L.balance(db, 'messaging_cost'), refundsDue: -L.balance(db, 'refund_due'), escrow: -q("SELECT COALESCE(SUM(amount_cents),0) b FROM ledger WHERE account LIKE 'escrow:%'")[0].b, driverPayable: -q("SELECT COALESCE(SUM(amount_cents),0) b FROM ledger WHERE account LIKE 'driver_payable:%'")[0].b, ledgerBalanced: L.total(db) === 0 },
+    money: { revenue: -L.balance(db, 'platform_revenue'), messaging: -L.balance(db, 'messaging_cost'), refundsDue: -L.balance(db, 'refund_due'), escrow: -q("SELECT COALESCE(SUM(amount_cents),0) b FROM ledger WHERE account LIKE 'escrow:%'")[0].b, driverPayable: -q("SELECT COALESCE(SUM(amount_cents),0) b FROM ledger WHERE account LIKE 'driver_payable:%'")[0].b, wallets: q("SELECT account, -SUM(amount_cents) bal FROM ledger WHERE account LIKE 'wallet:%' GROUP BY account"), ledgerBalanced: L.total(db) === 0 },
     hotspots: currentHotspots(db, region).slice(0, 8),
     drivers: q('SELECT id,name,vehicle,status,lat,lng,pro_until FROM drivers WHERE region_id=?', region.id),
     events: q('SELECT at,entity,entity_id,type,actor FROM events WHERE region_id=? ORDER BY id DESC LIMIT 30', region.id),
@@ -428,4 +535,7 @@ function overview(db, region) {
 module.exports = {
   loadRegions, localParts, addDays, today, createAccount, createDriver, buyPro, quote, createOrder, markPaid, previewConfirm, confirm, sweepUnconfirmed,
   dispatch, listOpenRuns, acceptRun, releaseRun, scan, ping, setPin, track, refreshHotspots, currentHotspots, runPayouts, releaseHoldbacks, overview, getOrder, driverTier, err,
+  walletBalance, walletTopup, walletStatement, walletPayOrder,
+  createQuoteLink, previewQuoteLink, redeemQuoteLink,
+  driverEarnings, adminSuspendDriver, notificationLog,
 };
