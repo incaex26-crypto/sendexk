@@ -13,11 +13,29 @@ function initAuth(db) {
   db.exec(`
 CREATE TABLE IF NOT EXISTS admin_users (id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created_at INTEGER);
 CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, kind TEXT NOT NULL, subject INTEGER NOT NULL, created_at INTEGER, expires_at INTEGER NOT NULL);
-CREATE INDEX IF NOT EXISTS ix_sessions_subject ON sessions(kind, subject);
 CREATE TABLE IF NOT EXISTS otp_codes (id INTEGER PRIMARY KEY, phone TEXT NOT NULL, code_hash TEXT NOT NULL, attempts INTEGER DEFAULT 0, created_at INTEGER, expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS rate_limits (id INTEGER PRIMARY KEY, bucket TEXT NOT NULL, key TEXT NOT NULL, at INTEGER NOT NULL);
-CREATE INDEX IF NOT EXISTS ix_rate ON rate_limits(bucket, key, at);
 CREATE TABLE IF NOT EXISTS locks (bucket TEXT, key TEXT, until INTEGER, PRIMARY KEY(bucket, key));`);
+
+  // Migrate sessions table created by the old driver-OTP code (pre-PR #9).
+  // Old schema: (token_hash, driver_id, region_id, created_at, expires_at, revoked_at)
+  // New schema: (token_hash, kind, subject, created_at, expires_at)
+  // Symptom: CREATE INDEX on (kind, subject) fails with "no such column: kind".
+  const cols = db.prepare('PRAGMA table_info(sessions)').all().map(r => r.name);
+  if (!cols.includes('kind')) {
+    db.exec(`
+ALTER TABLE sessions RENAME TO sessions_v1;
+CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, kind TEXT NOT NULL, subject INTEGER NOT NULL, created_at INTEGER, expires_at INTEGER NOT NULL);
+INSERT INTO sessions (token_hash, kind, subject, created_at, expires_at)
+  SELECT token_hash, 'driver', driver_id, created_at, expires_at
+  FROM sessions_v1
+  WHERE driver_id IS NOT NULL AND revoked_at IS NULL AND expires_at > 0;
+DROP TABLE sessions_v1;`);
+  }
+
+  db.exec(`
+CREATE INDEX IF NOT EXISTS ix_sessions_subject ON sessions(kind, subject);
+CREATE INDEX IF NOT EXISTS ix_rate ON rate_limits(bucket, key, at);`);
 }
 
 // ---- passwords: scrypt + random 16-byte salt, compared in constant time ----
