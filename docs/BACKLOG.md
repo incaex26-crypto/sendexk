@@ -16,7 +16,7 @@ Done when: tests cover every limit, the lock message, the suspend logout, expiry
 
 ## T2 · Notification layer (sandbox channels)
 risk: high
-status: todo
+status: done
 Files: src/notify.js (new), src/service.js, db schema file, test/
 Steps:
 1. One function notify({ to, kind, data }) in src/notify.js. Channels: whatsapp, sms, email, each an adapter with send() returning { ok, id } or { ok:false, reason }. Only fake adapters now; they record messages in a notifications table and in memory for tests. Real providers plug in later behind the same adapter shape.
@@ -25,6 +25,7 @@ Steps:
 4. Message kinds with plain templates in one file: otp_code, booking_confirmed, driver_assigned, out_for_delivery, delivered, payment_received, wallet_low. No marketing kinds. Include opt-out flag per user; service messages always send.
 5. Replace the dev-mode OTP "show on screen" path so OTP codes go through notify() with the sandbox channel; keep dev mode showing the code ONLY when the fake adapter is active and the server was started with npm run dev.
 Done when: tests cover fallback order, all-channels-fail result, business-number routing, opt-out, and "no codes shown on a live server"; npm test passes.
+result: notify() with fake sms/whatsapp/email, fallback, business numbers, OTP via notify; 72 tests pass
 
 ## T3 · Business wallet screen
 risk: high

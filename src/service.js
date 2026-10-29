@@ -12,6 +12,7 @@ const C = require('./confirm');
 const batching = require('./batching');
 const hot = require('./hotspots');
 const ETA = require('./eta');
+const N = require('./notify');
 
 const DAY = 86400000;
 const err = (status, message) => Object.assign(new Error(message), { status });
@@ -283,6 +284,7 @@ function scan(db, region, orderId, driverId, action, body = {}) {
       const mins = ETA.etaMinutes(region, d.vehicle, pos, [], { lat: o.drop_lat, lng: o.drop_lng });
       const w = ETA.window(clock.now(), mins);
       res = { order: moveOrder(db, o, 'out_for_delivery', { eta_mid: w.mid }, actor, 'out_for_delivery'), eta: w };
+      tell(db, o, 'out_for_delivery');
     } else if (action === 'deliver') {
       if (o.code_attempts >= region.rules.deliveryCodeMaxAttempts) throw err(429, 'too many wrong codes, call support');
       if (!body.code || !C.safeEqual(C.hash(String(body.code)), o.code_hash)) {
@@ -292,6 +294,7 @@ function scan(db, region, orderId, driverId, action, body = {}) {
       }
       const upd = moveOrder(db, o, 'delivered', {}, actor, 'delivered');
       settle(db, region, upd, run);
+      tell(db, o, 'delivered');
       res = { order: upd };
     } else if (action === 'fail') {
       if (!body.reason) throw err(400, 'reason required');
@@ -303,6 +306,11 @@ function scan(db, region, orderId, driverId, action, body = {}) {
     closeRunIfDone(db, region, run);
     return res;
   });
+}
+
+// Customer messages go out from the booking business's own WhatsApp number; a failed send never blocks delivery.
+function tell(db, o, kind) {
+  try { N.notify(db, { to: { role: 'customer', phone: o.drop_phone, businessId: o.account_id }, kind, data: { orderId: o.id } }); } catch { /* logged in notifications */ }
 }
 
 function settle(db, region, o, run, isReturn = false) {
