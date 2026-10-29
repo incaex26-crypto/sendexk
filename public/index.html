@@ -1,20 +1,156 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dispatch starter</title><link rel="stylesheet" href="app.css"></head><body>
-<h1 id="brand">Dispatch starter</h1><nav><a href="/">Book</a><a href="/driver.html">Driver</a><a href="/admin.html">Admin</a></nav>
-<div class="card"><h2>Book a same-day delivery</h2>
-<div class="row"><div><label>From zone</label><select id="from"></select></div><div><label>To zone</label><select id="to"></select></div></div>
-<label>Vehicle needed</label><select id="cls"><option value="bike">Motorbike / scooter</option><option value="car" selected>Car</option><option value="van">Van</option></select>
-<div class="row"><div><label>Your name</label><input id="sn" value="Zinc Bakery"></div><div><label>Recipient name</label><input id="rn" value="Sam"></div></div>
-<div id="quote" class="mute" style="margin-top:.6rem"></div>
-<button id="book">Book and pay (demo payment)</button><div id="out"></div></div>
-<script src="app.js"></script><script>
-let region;(async()=>{region=await api('GET','/api/region');$('#brand').textContent=region.brand.name+' · '+region.name;
-for(const s of['#from','#to'])$(s).innerHTML=region.zones.map(z=>`<option value="${z.id}">${z.name}</option>`).join('');$('#to').selectedIndex=1;
-['#from','#to','#cls'].forEach(s=>$(s).onchange=q);q()})();
-const zone=(id)=>region.zones.find(z=>z.id===id);
-async function q(){const body={pickup:zone($('#from').value),drop:zone($('#to').value),vehicleClass:$('#cls').value};
-try{const r=await api('POST','/api/quote',body);$('#quote').innerHTML=`Price: <b>${R(r.low)}–${R(r.cap)}</b> (you never pay more than ${R(r.cap)}) · delivery ${r.serviceDate}`}catch(e){$('#quote').innerHTML=`<span class=err>${e.message}</span>`}}
-$('#book').onclick=async()=>{try{const f=zone($('#from').value),t=zone($('#to').value);
-const o=await api('POST','/api/orders',{vehicleClass:$('#cls').value,weightKg:2,category:'parcel',sender:{name:$('#sn').value,phone:'0110000000'},recipient:{name:$('#rn').value,phone:'0830000000'},pickup:{lat:f.lat,lng:f.lng,address:f.name},drop:{lat:t.lat,lng:t.lng,address:t.name}});
-const p=await api('POST',`/api/orders/${o.order.id}/pay`);
-$('#out').innerHTML=`<p class="ok">Order #${o.order.id} paid. The recipient gets this link by SMS:</p><p><a href="${p.confirmUrl}">${location.origin}${p.confirmUrl}</a></p><p class="mute">Nothing is collected until they confirm.</p>`}catch(e){$('#out').innerHTML=`<p class=err>${e.message}</p>`}};
-</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SenDexk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>
+.sheet { height: 352px; }
+.suburb-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.suburb-chip { display: flex; align-items: center; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid var(--border); color: var(--ink); font-size: 14px; font-weight: 600; background: var(--sheet); cursor: pointer; }
+.suburb-chip:hover { background: var(--selected); }
+.where-input { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 16px; border-radius: 16px; border: 1px solid var(--border); background: var(--fill); color: var(--ink); cursor: pointer; width: 100%; }
+</style>
+</head>
+<body>
+<div class="map-page" id="page">
+  <div id="map-canvas"></div>
+  <div class="map-overlay">
+    <!-- Top bar -->
+    <button class="nav-pill left" id="menu-btn" aria-label="Menu">
+      <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+    </button>
+    <div class="nav-pill right" id="wallet-pill" style="display:none">
+      <span style="color:var(--mute);font-weight:600" class="wallet-label">Wallet</span>
+      <span id="wallet-bal" class="wallet-amount">—</span>
+    </div>
+    <!-- Bottom sheet -->
+    <div class="sheet" id="sheet">
+      <div class="sheet-handle"></div>
+      <h1>Send a parcel</h1>
+      <!-- Pickup address row -->
+      <div class="row" style="min-height:48px;gap:14px">
+        <div class="dot-pickup" style="margin-left:4px"></div>
+        <div class="col">
+          <span class="label">Pickup</span>
+          <span style="font-size:16px;font-weight:700" id="pickup-label">Tap the map to set pickup</span>
+        </div>
+      </div>
+      <!-- Where to search -->
+      <button class="where-input" id="where-btn" aria-label="Search drop-off address">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+        <span style="font-size:16px;font-weight:600;color:var(--mute)">Where to?</span>
+      </button>
+      <!-- Suburb shortcuts -->
+      <div class="suburb-chips" id="suburb-chips"></div>
+      <p style="margin:0;font-size:13px;line-height:1.4;color:var(--mute)">Same-day delivery. You see the price before you pay.</p>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"></script>
+<script>
+// State stored in sessionStorage so Choose can read it
+const ss = (k, v) => v !== undefined ? sessionStorage.setItem('book.' + k, JSON.stringify(v)) : JSON.parse(sessionStorage.getItem('book.' + k) || 'null');
+let map, region, pickupMarker, dropMarker;
+
+async function init() {
+  region = await fetch('/api/region').then(r => r.json());
+  // Suburb chips from region zones
+  const chips = document.getElementById('suburb-chips');
+  (region.zones || []).slice(0, 6).forEach(z => {
+    const btn = document.createElement('button');
+    btn.className = 'suburb-chip';
+    btn.textContent = z.name;
+    btn.onclick = () => selectDrop({ lat: z.lat, lng: z.lng, address: z.name });
+    chips.appendChild(btn);
+  });
+
+  // Restore state
+  const p = ss('pickup'), d = ss('drop');
+  if (p) setPickup(p);
+  if (d) setDrop(d);
+
+  // Map
+  if (window.maplibregl && window.pmtiles) {
+    const protocol = new pmtiles.Protocol();
+    maplibregl.addProtocol('pmtiles', protocol.tile.bind(protocol));
+    const tilesUrl = region.map && region.map.tilesUrl ? region.map.tilesUrl : '/maps/jhb.pmtiles';
+    map = new maplibregl.Map({
+      container: 'map-canvas',
+      style: mapStyle('pmtiles://' + window.location.origin + tilesUrl),
+      center: [region.center.lng, region.center.lat],
+      zoom: 12,
+    });
+    map.on('click', e => {
+      const { lat, lng } = e.lngLat;
+      if (!ss('pickup')) setPickup({ lat, lng, address: `${lat.toFixed(5)}, ${lng.toFixed(5)}` });
+    });
+    map.on('error', () => {}); // tiles may not exist in dev
+  }
+
+  // Wallet if logged in
+  fetch('/api/wallet', { credentials: 'include' }).then(r => r.ok ? r.json() : null).then(w => {
+    if (!w) return;
+    document.getElementById('wallet-pill').style.display = 'flex';
+    document.getElementById('wallet-bal').textContent = fmtR(w.balanceCents);
+  }).catch(() => {});
+}
+
+function setPickup(loc) {
+  ss('pickup', loc);
+  document.getElementById('pickup-label').textContent = loc.address || `${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`;
+  if (map) {
+    if (pickupMarker) pickupMarker.remove();
+    pickupMarker = new maplibregl.Marker({ color: '#2563E8' }).setLngLat([loc.lng, loc.lat]).addTo(map);
+  }
+}
+
+function setDrop(loc) {
+  ss('drop', loc);
+  if (map) {
+    if (dropMarker) dropMarker.remove();
+    dropMarker = new maplibregl.Marker({ color: '#0F1B2D' }).setLngLat([loc.lng, loc.lat]).addTo(map);
+  }
+}
+
+function selectDrop(loc) {
+  setDrop(loc);
+  window.location.href = 'choose.html';
+}
+
+document.getElementById('where-btn').onclick = () => {
+  // If pickup set, go straight to choose; else show a simple prompt
+  if (ss('pickup')) window.location.href = 'choose.html';
+  else {
+    // Minimal geocode fallback: just go to choose and let user search there
+    window.location.href = 'choose.html';
+  }
+};
+
+function mapStyle(tileUrl) {
+  return {
+    version: 8,
+    sources: { pm: { type: 'vector', url: tileUrl, attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>' } },
+    layers: [
+      { id: 'bg', type: 'background', paint: { 'background-color': '#EAF0F5' } },
+      { id: 'earth', type: 'fill', source: 'pm', 'source-layer': 'earth', paint: { 'fill-color': '#EAF0F5' } },
+      { id: 'water', type: 'fill', source: 'pm', 'source-layer': 'water', paint: { 'fill-color': '#BDD8EC' } },
+      { id: 'park', type: 'fill', source: 'pm', 'source-layer': 'landuse', filter: ['in', ['get', 'pmap:kind'], ['literal', ['park', 'nature_reserve', 'grass']]], paint: { 'fill-color': '#D6EABF', 'fill-opacity': 0.7 } },
+      { id: 'bldg', type: 'fill', source: 'pm', 'source-layer': 'buildings', minzoom: 13, paint: { 'fill-color': '#DDD9D3', 'fill-outline-color': '#C8C4BE' } },
+      { id: 'road-minor', type: 'line', source: 'pm', 'source-layer': 'roads', paint: { 'line-color': '#FFFFFF', 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1, 16, 4] } },
+      { id: 'road-major', type: 'line', source: 'pm', 'source-layer': 'roads', filter: ['in', ['get', 'pmap:kind'], ['literal', ['primary', 'secondary', 'trunk', 'highway']]], paint: { 'line-color': '#F0D87A', 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2, 16, 8] } },
+    ],
+  };
+}
+function fmtR(c) { return 'R' + (c / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+
+init();
+</script>
+</body>
+</html>

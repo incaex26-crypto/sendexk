@@ -1,159 +1,249 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Business — SenDexk</title>
-<link rel="stylesheet" href="/app.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Business wallet — SenDexk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
 <style>
-.stat-row{display:flex;gap:10px;margin:10px 0}
-.stat{flex:1;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
-.stat .num{font-size:1.6rem;font-weight:700;color:var(--blue-light)}
-.topup-btns{display:flex;gap:8px;flex-wrap:wrap;margin:.6rem 0}
-.topup-btns button{width:auto;padding:.5rem 1rem;flex:1;min-width:80px}
-.stmt-row td:last-child{text-align:right;font-variant-numeric:tabular-nums}
-.credit{color:var(--ok)}.debit{color:var(--danger)}
-#section-login,#section-dash{display:none}
+body { background:var(--bg); min-height:100dvh; margin:0; font-family:Manrope,sans-serif; color:var(--ink); }
+.page-wrap { max-width:680px; margin:0 auto; padding:24px 16px 48px; }
+.section-card { background:var(--sheet); border:1px solid var(--border); border-radius:20px; padding:20px; margin-bottom:16px; }
+.topup-row { display:flex; gap:8px; flex-wrap:wrap; }
+.topup-btn { flex:1; min-width:80px; height:48px; border-radius:14px; border:1px solid var(--border); background:var(--fill); font-family:Manrope,sans-serif; font-size:15px; font-weight:700; cursor:pointer; color:var(--ink); }
+.topup-btn:hover { background:var(--selected); border-color:var(--brand); }
+.stmt-row { display:flex; gap:12px; padding:12px 0; border-top:1px solid #E3E8EF; font-size:14px; }
+.stmt-row:first-child { border-top:none; }
+.credit { color:#16a34a; }
+.debit { color:var(--danger); }
+.tab-btn { flex:1; height:44px; border-radius:12px; border:1px solid var(--border); background:var(--fill); font-family:Manrope,sans-serif; font-size:14px; font-weight:600; cursor:pointer; color:var(--mute); }
+.tab-btn.active { background:var(--selected); border-color:var(--brand); color:var(--ink); font-weight:700; }
 </style>
 </head>
 <body>
-<nav><a href="/">Book</a> <a href="/track.html">Track</a> <strong>Business</strong></nav>
-<h1>Business account</h1>
 
-<div id="section-login">
-  <div class="card">
-    <h2>Sign in</h2>
-    <label>Business phone number</label>
-    <input id="phone" type="tel" placeholder="e.g. 0820000000">
-    <button id="btn-otp">Send code</button>
-    <div id="otp-step" style="display:none">
-      <label>6-digit code</label>
-      <input id="code" type="text" maxlength="6" placeholder="123456">
-      <button id="btn-verify">Sign in</button>
+<!-- Login -->
+<div id="scr-login" style="display:flex;align-items:center;justify-content:center;min-height:100dvh">
+  <div style="width:100%;max-width:380px;padding:32px 24px;border-radius:24px;border:1px solid var(--border);background:var(--sheet)">
+    <h1 style="margin:0 0 4px;font-size:26px;font-weight:800">Business sign in</h1>
+    <p style="color:var(--mute);font-size:14px;margin:0 0 24px">We'll send a code to your business phone.</p>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label for="biz-phone" style="font-size:12px;font-weight:600;color:var(--mute)">Business phone</label>
+        <input id="biz-phone" type="tel" placeholder="0820000000" style="height:50px;border-radius:14px;border:1px solid var(--border);background:var(--fill);padding:0 14px;font-size:15px;font-weight:600;font-family:Manrope,sans-serif;color:var(--ink)">
+      </div>
+      <button id="btn-send-code" class="btn btn-primary">Send code</button>
+      <div id="verify-step" style="display:none;flex-direction:column;gap:12px">
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <label for="biz-code" style="font-size:12px;font-weight:600;color:var(--mute)">6-digit code</label>
+          <input id="biz-code" type="text" inputmode="numeric" maxlength="6" placeholder="123456" style="height:50px;border-radius:14px;border:1px solid var(--border);background:var(--fill);padding:0 14px;font-size:22px;font-weight:800;text-align:center;font-family:Manrope,sans-serif;color:var(--ink)">
+        </div>
+        <button id="btn-verify-code" class="btn btn-primary">Sign in</button>
+      </div>
+      <p id="login-msg" style="color:var(--mute);font-size:14px;margin:0;text-align:center"></p>
     </div>
-    <p class="mute" id="login-msg"></p>
   </div>
 </div>
 
-<div id="section-dash">
-  <div class="stat-row">
-    <div class="stat"><div class="num" id="wallet-bal">R0.00</div><div class="mute">Wallet balance</div></div>
-    <div class="stat"><div class="num" id="orders-count">0</div><div class="mute">Orders today</div></div>
-  </div>
-  <div class="card">
-    <h2>Top up wallet</h2>
-    <div class="topup-btns">
-      <button onclick="topup(20000)">R200</button>
-      <button onclick="topup(50000)">R500</button>
-      <button onclick="topup(100000)">R1 000</button>
-      <button onclick="topup(200000)">R2 000</button>
+<!-- Dashboard -->
+<div id="scr-dash" style="display:none">
+  <div class="page-wrap">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px">
+      <h1 style="margin:0;font-size:26px;font-weight:800">Business wallet</h1>
+      <button id="btn-signout" class="btn" style="height:40px;padding:0 14px;font-size:13px;background:transparent;border:1px solid var(--border);color:var(--ink)">Sign out</button>
     </div>
-    <label>Custom amount (min R100)</label>
-    <div class="row">
-      <input id="custom-amt" type="number" placeholder="Amount in Rand" min="100" step="100">
-      <button onclick="topupCustom()" style="margin-top:0">Top up</button>
+
+    <!-- Tab nav -->
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <button class="tab-btn active" id="tab-wallet" onclick="switchTab('wallet')">Wallet</button>
+      <button class="tab-btn" id="tab-statement" onclick="switchTab('statement')">Statement</button>
+      <button class="tab-btn" id="tab-keys" onclick="switchTab('keys')">API keys</button>
     </div>
-    <p id="topup-msg" class="mute"></p>
-  </div>
-  <div class="card">
-    <h2>Statement <span class="mute" style="font-size:.8rem">(last 50)</span></h2>
-    <table>
-      <thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Amount</th><th style="text-align:right">Balance</th></tr></thead>
-      <tbody id="stmt-body"><tr><td colspan="4" class="mute">No transactions yet.</td></tr></tbody>
-    </table>
-    <button class="alt" onclick="downloadCsv()" style="margin-top:10px;width:auto;padding:.4rem .9rem">Download CSV</button>
-  </div>
-  <div class="card">
-    <h2>Book a delivery for your customer</h2>
-    <a href="/" style="color:var(--brand)">Go to booking page →</a>
-    <p class="mute" style="margin-top:6px">Your account is charged from your wallet at dispatch. Delivery link mode lets you embed a pay-by-link in your checkout.</p>
+
+    <!-- Wallet tab -->
+    <div id="pane-wallet">
+      <div class="section-card">
+        <div style="font-size:13px;font-weight:600;color:var(--mute);margin-bottom:6px">Balance</div>
+        <div id="balance" style="font-size:42px;font-weight:800;line-height:1">R0.00</div>
+      </div>
+      <div class="section-card">
+        <h2 style="margin:0 0 14px;font-size:16px;font-weight:800">Top up</h2>
+        <div class="topup-row" style="margin-bottom:12px">
+          <button class="topup-btn" onclick="topup(20000)">R200</button>
+          <button class="topup-btn" onclick="topup(50000)">R500</button>
+          <button class="topup-btn" onclick="topup(100000)">R1 000</button>
+          <button class="topup-btn" onclick="topup(200000)">R2 000</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="custom-amt" type="number" placeholder="Custom amount in Rand" min="100" step="50" style="flex:1;height:48px;border-radius:14px;border:1px solid var(--border);background:var(--fill);padding:0 14px;font-size:15px;font-family:Manrope,sans-serif;color:var(--ink)">
+          <button onclick="topupCustom()" class="btn btn-primary" style="height:48px;white-space:nowrap">Top up</button>
+        </div>
+        <p id="topup-msg" style="color:var(--mute);font-size:14px;margin:8px 0 0;min-height:20px"></p>
+      </div>
+      <div class="section-card">
+        <h2 style="margin:0 0 10px;font-size:16px;font-weight:800">Send a parcel</h2>
+        <a href="/" style="color:var(--brand);font-size:15px;font-weight:600">Book a delivery</a>
+        <p style="color:var(--mute);font-size:13px;margin:6px 0 0">Your wallet is charged when a driver picks up. You see the price before you pay.</p>
+      </div>
+    </div>
+
+    <!-- Statement tab -->
+    <div id="pane-statement" style="display:none">
+      <div class="section-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <h2 style="margin:0;font-size:16px;font-weight:800">Statement</h2>
+          <button onclick="downloadCsv()" class="btn" style="height:36px;padding:0 12px;font-size:13px;background:transparent;border:1px solid var(--border);color:var(--ink)">Download CSV</button>
+        </div>
+        <div id="stmt-rows"><p style="color:var(--mute);font-size:14px">No transactions yet.</p></div>
+      </div>
+    </div>
+
+    <!-- API keys tab -->
+    <div id="pane-keys" style="display:none">
+      <div class="section-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <h2 style="margin:0;font-size:16px;font-weight:800">API keys</h2>
+          <button id="btn-new-key" class="btn btn-primary" style="height:36px;padding:0 14px;font-size:13px">New key</button>
+        </div>
+        <p style="color:var(--mute);font-size:13px;margin:0 0 14px">Keys let your checkout system create delivery links without requiring a login.</p>
+        <div id="new-key-section" style="display:none;padding:14px;border-radius:14px;border:1px solid var(--brand);background:var(--selected);margin-bottom:14px;font-size:14px">
+          <p style="margin:0 0 6px;font-weight:700">Copy this key now — it will not be shown again.</p>
+          <code id="new-key-value" style="font-size:13px;word-break:break-all;color:var(--ink)"></code>
+        </div>
+        <div id="keys-list"><p style="color:var(--mute);font-size:14px">No keys yet.</p></div>
+      </div>
+    </div>
+
+    <p id="global-err" style="display:none;color:var(--danger);font-size:14px;margin:0"></p>
   </div>
 </div>
 
-<p id="global-err" class="err" style="display:none"></p>
-
-<script src="/app.js"></script>
+<script src="app.js"></script>
 <script>
-let accountId = null;
-const R = (c) => 'R' + (c / 100).toFixed(2);
+let statement = [];
+
+document.getElementById('btn-send-code').onclick = async () => {
+  const phone = document.getElementById('biz-phone').value.trim();
+  if (!phone) return;
+  setMsg('Sending…');
+  try {
+    await api('POST', '/api/business/otp', { phone });
+    document.getElementById('verify-step').style.display = 'flex';
+    setMsg('Code sent. Check your phone.');
+  } catch (e) { setMsg(e.message); }
+};
+
+document.getElementById('btn-verify-code').onclick = async () => {
+  const phone = document.getElementById('biz-phone').value.trim();
+  const code = document.getElementById('biz-code').value.trim();
+  setMsg('Checking…');
+  try {
+    await api('POST', '/api/business/verify', { phone, code });
+    // cookie is set by server
+    showDash();
+  } catch (e) { setMsg(e.message); }
+};
+
+function setMsg(t) { document.getElementById('login-msg').textContent = t; }
+
+document.getElementById('btn-signout').onclick = async () => {
+  await api('POST', '/api/business/logout', {}).catch(() => {});
+  document.getElementById('scr-dash').style.display = 'none';
+  document.getElementById('scr-login').style.display = 'flex';
+};
 
 function showDash() {
-  $('#section-login').style.display = 'none';
-  $('#section-dash').style.display = '';
+  document.getElementById('scr-login').style.display = 'none';
+  document.getElementById('scr-dash').style.display = '';
   loadWallet();
-}
-
-async function sendOtp() {
-  const phone = $('#phone').value.trim();
-  if (!phone) return;
-  try {
-    await api('POST', '/api/driver/otp', { phone });
-    $('#otp-step').style.display = '';
-    $('#login-msg').textContent = 'Code sent. Check your phone.';
-  } catch (e) { $('#login-msg').textContent = e.message; }
-}
-
-async function verify() {
-  const phone = $('#phone').value.trim(), code = $('#code').value.trim();
-  try {
-    // Reuse driver OTP endpoint; businesses register as accounts separately (see GAPS.md)
-    const r = await api('POST', '/api/driver/verify', { phone, code });
-    accountId = r.driverId;
-    localStorage.setItem('biz_account', accountId);
-    showDash();
-  } catch (e) { $('#login-msg').textContent = e.message; }
 }
 
 async function loadWallet() {
   try {
-    const r = await api('GET', `/api/wallet`, null, { 'x-account-id': String(accountId) });
-    $('#wallet-bal').textContent = R(r.balanceCents);
-    renderStatement(r.statement);
-  } catch (e) { showErr(e.message); }
+    const r = await api('GET', '/api/wallet');
+    document.getElementById('balance').textContent = fmtR(r.balanceCents);
+    statement = r.statement || [];
+    renderStatement();
+  } catch (e) { document.getElementById('global-err').textContent = e.message; document.getElementById('global-err').style.display = ''; }
 }
 
-function renderStatement(rows) {
-  const body = $('#stmt-body');
-  if (!rows.length) { body.innerHTML = '<tr><td colspan="4" class="mute">No transactions yet.</td></tr>'; return; }
-  body.innerHTML = rows.map((r) => {
-    const sign = r.amountCents >= 0 ? 'credit' : 'debit';
-    const amt = (r.amountCents >= 0 ? '+' : '') + R(r.amountCents);
-    return `<tr><td>${fmtDate(new Date(r.at).toISOString())}</td><td>${r.memo}</td><td class="${sign}" style="text-align:right">${amt}</td><td style="text-align:right">${R(r.balanceCents)}</td></tr>`;
+function renderStatement() {
+  const el = document.getElementById('stmt-rows');
+  if (!statement.length) { el.innerHTML = '<p style="color:var(--mute);font-size:14px">No transactions yet.</p>'; return; }
+  el.innerHTML = statement.map(r => {
+    const cls = r.amountCents >= 0 ? 'credit' : 'debit';
+    const sign = r.amountCents >= 0 ? '+' : '';
+    return `<div class="stmt-row">
+      <span style="color:var(--mute);flex-shrink:0;min-width:100px">${fmtDate(r.at)}</span>
+      <span style="flex:1">${r.memo || '—'}</span>
+      <span class="${cls}" style="font-weight:700;flex-shrink:0">${sign}${fmtR(r.amountCents)}</span>
+      <span style="color:var(--mute);flex-shrink:0;min-width:80px;text-align:right">${fmtR(r.balanceCents)}</span>
+    </div>`;
   }).join('');
 }
 
 async function topup(cents) {
   try {
-    const r = await api('POST', '/api/wallet/topup', { cents }, { 'x-account-id': String(accountId) });
-    $('#wallet-bal').textContent = R(r.balanceCents);
-    $('#topup-msg').textContent = `Topped up. New balance: ${R(r.balanceCents)}`;
-    loadWallet();
-  } catch (e) { $('#topup-msg').textContent = e.message; }
+    const r = await api('POST', '/api/wallet/topup', { cents });
+    document.getElementById('balance').textContent = fmtR(r.balanceCents);
+    document.getElementById('topup-msg').textContent = 'Topped up. New balance: ' + fmtR(r.balanceCents);
+    await loadWallet();
+  } catch (e) { document.getElementById('topup-msg').textContent = e.message; }
 }
 
 function topupCustom() {
-  const rand = Number($('#custom-amt').value);
-  if (!rand || rand < 100) { $('#topup-msg').textContent = 'Minimum top-up is R100.'; return; }
+  const rand = Number(document.getElementById('custom-amt').value);
+  if (!rand || rand < 100) { document.getElementById('topup-msg').textContent = 'Minimum top-up is R100.'; return; }
   topup(Math.round(rand * 100));
 }
 
 function downloadCsv() {
-  api('GET', `/api/wallet`, null, { 'x-account-id': String(accountId) }).then((r) => {
-    const lines = ['Date,Description,Amount,Balance', ...r.statement.map((s) => `${new Date(s.at).toISOString()},${JSON.stringify(s.memo)},${(s.amountCents/100).toFixed(2)},${(s.balanceCents/100).toFixed(2)}`)];
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
-    a.download = 'statement.csv'; a.click();
-  });
+  if (!statement.length) { alert('No transactions to download.'); return; }
+  const lines = ['Date,Description,Amount,Balance',
+    ...statement.map(s => `${new Date(s.at).toISOString()},${JSON.stringify(s.memo)},${(s.amountCents/100).toFixed(2)},${(s.balanceCents/100).toFixed(2)}`)];
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
+  a.download = 'statement.csv'; a.click();
 }
 
-function showErr(msg) { const e = $('#global-err'); e.textContent = msg; e.style.display = ''; }
+async function loadKeys() {
+  // GET /api/store/keys is not yet implemented (no list endpoint in server); show placeholder
+  document.getElementById('keys-list').innerHTML = '<p style="color:var(--mute);font-size:14px">Key management is available via the API.</p>';
+}
 
-$('#btn-otp').addEventListener('click', sendOtp);
-$('#btn-verify').addEventListener('click', verify);
+document.getElementById('btn-new-key').onclick = async () => {
+  const name = prompt('Name for this key (e.g. "Checkout system"):');
+  if (!name) return;
+  try {
+    const r = await api('POST', '/api/store/keys', { name });
+    document.getElementById('new-key-value').textContent = r.key;
+    document.getElementById('new-key-section').style.display = '';
+  } catch (e) { alert(e.message); }
+};
 
-// Restore session
-const saved = localStorage.getItem('biz_account');
-if (saved) { accountId = Number(saved); showDash(); }
-else { $('#section-login').style.display = ''; }
+function switchTab(name) {
+  ['wallet','statement','keys'].forEach(t => {
+    document.getElementById('pane-' + t).style.display = t === name ? '' : 'none';
+    document.getElementById('tab-' + t).classList.toggle('active', t === name);
+  });
+  if (name === 'statement') renderStatement();
+  if (name === 'keys') loadKeys();
+}
+
+function fmtR(c) { return 'R' + ((c || 0) / 100).toFixed(2); }
+function fmtDate(ts) {
+  try {
+    const d = new Date(ts);
+    return d.toLocaleDateString('en-ZA', { day:'2-digit', month:'short' });
+  } catch { return '—'; }
+}
+
+// Auto-login check: try to load wallet; if it works the cookie is valid
+api('GET', '/api/wallet').then(() => showDash()).catch(() => {
+  document.getElementById('scr-login').style.display = 'flex';
+});
 </script>
 </body>
 </html>

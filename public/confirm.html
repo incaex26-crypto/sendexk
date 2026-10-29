@@ -1,14 +1,169 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm delivery</title><link rel="stylesheet" href="app.css"></head><body>
-<h1>Confirm your delivery</h1><div id="info" class="card">Loading…</div><div id="mapbox"></div>
-<div class="card" id="act" hidden><button id="gps" class="alt">Use my current location</button><button id="yes">Confirm: I'll be here</button><button id="no" class="alt">I won't be available today</button><p id="msg"></p></div>
-<script src="app.js"></script><script>
-const token=new URLSearchParams(location.search).get('t');let pin=null,map;
-(async()=>{try{const o=await api('GET','/api/confirm/'+token);
-$('#info').innerHTML=`<b>${o.from}</b> is sending you a parcel on <b>${o.serviceDate}</b>.<br><span class=mute>Drag the pin to where you'll be to receive it.</span>`;
-pin={lat:o.lat,lng:o.lng};map=mapView($('#mapbox'),{zones:[{name:'Here',lat:o.lat,lng:o.lng}].concat(o.region.zones||[])});
-const reg=await api('GET','/api/region');map=mapView($('#mapbox'),reg,{pins:[{...pin,label:'Deliver here'}],onPin:(p)=>{pin=p;map.draw([{...p,label:'Deliver here'}])}});$('#act').hidden=false;
-if(o.confirmed)$('#msg').textContent='Already confirmed. You can move the pin and confirm again.'}catch(e){$('#info').innerHTML=`<span class=err>${e.message}</span>`}})();
-$('#gps').onclick=()=>navigator.geolocation?.getCurrentPosition(p=>{pin={lat:p.coords.latitude,lng:p.coords.longitude};map.draw([{...pin,label:'Deliver here'}])},()=>$('#msg').textContent='Could not read your location. Drag the pin instead.');
-$('#yes').onclick=async()=>{try{const r=await api('POST','/api/confirm/'+token,{available:true,...pin});$('#act').hidden=true;$('#info').innerHTML=`<p class=ok>Confirmed for ${r.serviceDate}.</p><p>Your delivery code:</p><div class=big>${r.deliveryCode}</div><p class=mute>Tell the driver this code when they hand over the parcel. Don't share it earlier.</p>`}catch(e){$('#msg').innerHTML=`<span class=err>${e.message}</span>`}};
-$('#no').onclick=async()=>{try{const r=await api('POST','/api/confirm/'+token,{available:false});$('#act').hidden=true;$('#info').innerHTML=`<p>No problem. We moved it to ${r.serviceDate} and will ask again.</p>`}catch(e){$('#msg').innerHTML=`<span class=err>${e.message}</span>`}};
-</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Confirm your delivery — SenDexk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>
+body { background:var(--bg); margin:0; font-family:Manrope,sans-serif; color:var(--ink); }
+.code-digits { display:flex; gap:10px; }
+.code-digit { flex:1; height:56px; border-radius:12px; border:1px solid var(--border); background:var(--sheet); display:flex; align-items:center; justify-content:center; font-size:28px; font-weight:800; }
+</style>
+</head>
+<body>
+<div class="map-page">
+  <div id="map-canvas"></div>
+  <div class="map-overlay">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+
+      <div id="pane-loading" style="color:var(--mute);font-size:14px">Loading delivery details…</div>
+
+      <div id="pane-confirm" style="display:none;flex-direction:column;gap:14px">
+        <div>
+          <h1 style="margin:0 0 4px;font-size:22px;font-weight:800">Confirm your delivery</h1>
+          <p id="info-text" style="margin:0;font-size:14px;color:var(--mute)"></p>
+        </div>
+        <p style="margin:0;font-size:14px;color:var(--mute)">Drag the pin on the map to the exact spot where you'll receive the parcel.</p>
+        <div style="display:flex;gap:10px">
+          <button id="btn-gps" class="btn" style="flex:1;height:48px;background:transparent;border:1px solid var(--border);font-size:14px;font-weight:600;color:var(--ink)">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="margin-right:6px;vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7"/></svg>
+            Use my location
+          </button>
+        </div>
+        <p id="confirm-msg" style="display:none;font-size:14px;margin:0"></p>
+        <button id="btn-yes" class="btn btn-primary">I'll be here — confirm</button>
+        <button id="btn-no" class="btn" style="background:transparent;border:1px solid var(--border);color:var(--ink);height:44px;font-size:14px">I won't be available today</button>
+      </div>
+
+      <div id="pane-done" style="display:none;flex-direction:column;gap:14px">
+        <h1 style="margin:0;font-size:22px;font-weight:800;color:#16a34a">Confirmed</h1>
+        <p id="done-text" style="margin:0;font-size:14px;color:var(--mute)"></p>
+        <div style="padding:16px;border-radius:16px;border:1px solid var(--border);background:var(--fill);display:flex;flex-direction:column;gap:10px">
+          <span style="font-size:13px;font-weight:600;color:var(--mute)">Your delivery code. Give it to the driver when the parcel arrives.</span>
+          <div class="code-digits" id="code-display"></div>
+        </div>
+        <a id="track-link" href="track.html" class="btn btn-primary" style="display:flex;align-items:center;justify-content:center;text-decoration:none">Track delivery</a>
+      </div>
+
+      <div id="pane-rescheduled" style="display:none;flex-direction:column;gap:12px">
+        <h1 style="margin:0;font-size:22px;font-weight:800">Got it</h1>
+        <p id="reschedule-text" style="margin:0;font-size:14px;color:var(--mute)"></p>
+      </div>
+
+      <div id="pane-error" style="display:none">
+        <p id="error-text" style="color:var(--danger);font-size:14px;margin:0"></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"></script>
+<script src="app.js"></script>
+<script>
+const token = new URLSearchParams(location.search).get('t');
+let pin = null, map, dropMarker, region, protocolAdded = false, orderId = null;
+
+function showPane(name) {
+  ['loading','confirm','done','rescheduled','error'].forEach(n => {
+    const el = document.getElementById('pane-' + n);
+    el.style.display = n === name ? 'flex' : 'none';
+  });
+}
+
+async function init() {
+  if (!token) { showPane('error'); document.getElementById('error-text').textContent = 'Invalid confirmation link.'; return; }
+  try {
+    region = await api('GET', '/api/region');
+    const o = await api('GET', '/api/confirm/' + token);
+    orderId = o.orderId;
+    pin = { lat: o.lat, lng: o.lng };
+    const from = o.from || 'Someone';
+    const date = o.serviceDate || 'today';
+    document.getElementById('info-text').textContent = from + ' is sending you a parcel on ' + date + '.';
+    if (o.confirmed) {
+      document.getElementById('confirm-msg').textContent = 'Already confirmed. You can move the pin and confirm again.';
+      document.getElementById('confirm-msg').style.display = '';
+    }
+    showPane('confirm');
+    initMap(o.lat, o.lng);
+  } catch (e) { showPane('error'); document.getElementById('error-text').textContent = e.message || 'Could not load this link.'; }
+}
+
+function initMap(lat, lng) {
+  if (!window.maplibregl || !window.pmtiles) return;
+  if (!protocolAdded) {
+    const protocol = new pmtiles.Protocol();
+    maplibregl.addProtocol('pmtiles', protocol.tile.bind(protocol));
+    protocolAdded = true;
+  }
+  const tilesUrl = region && region.map && region.map.tilesUrl ? region.map.tilesUrl : '/maps/jhb.pmtiles';
+  map = new maplibregl.Map({
+    container: 'map-canvas',
+    style: { version: 8, sources: { pm: { type: 'vector', url: 'pmtiles://' + window.location.origin + tilesUrl } }, layers: [
+      { id: 'bg', type: 'background', paint: { 'background-color': '#EAF0F5' } },
+      { id: 'earth', type: 'fill', source: 'pm', 'source-layer': 'earth', paint: { 'fill-color': '#EAF0F5' } },
+      { id: 'water', type: 'fill', source: 'pm', 'source-layer': 'water', paint: { 'fill-color': '#BDD8EC' } },
+      { id: 'roads', type: 'line', source: 'pm', 'source-layer': 'roads', paint: { 'line-color': '#FFFFFF', 'line-width': 2 } },
+    ] },
+    center: [lng, lat], zoom: 15,
+  });
+  map.on('error', () => {});
+  dropMarker = new maplibregl.Marker({ color: '#2563E8', draggable: true }).setLngLat([lng, lat]).addTo(map);
+  dropMarker.on('dragend', () => { const ll = dropMarker.getLngLat(); pin = { lat: ll.lat, lng: ll.lng }; });
+}
+
+document.getElementById('btn-gps').onclick = () => {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(p => {
+    pin = { lat: p.coords.latitude, lng: p.coords.longitude };
+    if (dropMarker) dropMarker.setLngLat([pin.lng, pin.lat]);
+    if (map) map.flyTo({ center: [pin.lng, pin.lat], zoom: 16 });
+  }, () => {
+    document.getElementById('confirm-msg').textContent = 'Could not read your location. Drag the pin instead.';
+    document.getElementById('confirm-msg').style.display = '';
+  });
+};
+
+document.getElementById('btn-yes').onclick = async () => {
+  const btn = document.getElementById('btn-yes');
+  btn.disabled = true;
+  try {
+    const r = await api('POST', '/api/confirm/' + token, { available: true, ...(pin || {}) });
+    const code = r.deliveryCode || '';
+    document.getElementById('done-text').textContent = 'Confirmed for ' + (r.serviceDate || 'today') + '. Tell the driver this code when they hand over the parcel — not before.';
+    // Show code digits
+    document.getElementById('code-display').innerHTML = code.split('').map(d => `<div class="code-digit">${d}</div>`).join('');
+    // Save orderId to sessionStorage so track.html can use it
+    if (r.orderId || orderId) {
+      sessionStorage.setItem('track.orderId', String(r.orderId || orderId));
+    }
+    document.getElementById('track-link').href = 'track.html' + (r.orderId ? '?order=' + r.orderId : '');
+    showPane('done');
+  } catch (e) {
+    document.getElementById('confirm-msg').textContent = e.message || 'Something went wrong. Try again.';
+    document.getElementById('confirm-msg').style.display = '';
+    btn.disabled = false;
+  }
+};
+
+document.getElementById('btn-no').onclick = async () => {
+  try {
+    const r = await api('POST', '/api/confirm/' + token, { available: false });
+    document.getElementById('reschedule-text').textContent = 'No problem. We moved it to ' + (r.serviceDate || 'another day') + ' and will ask again.';
+    showPane('rescheduled');
+  } catch (e) {
+    document.getElementById('confirm-msg').textContent = e.message || 'Something went wrong. Try again.';
+    document.getElementById('confirm-msg').style.display = '';
+  }
+};
+
+init();
+</script>
+</body>
+</html>

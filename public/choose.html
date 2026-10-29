@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Choose a vehicle — SenDexk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>
+.sheet { height: 484px; }
+.windows { display: flex; gap: 8px; }
+.vehicles { display: flex; flex-direction: column; gap: 8px; }
+.continue-bar { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 20px 24px; background: var(--sheet); border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+</style>
+</head>
+<body>
+<div class="map-page" id="page">
+  <div id="map-canvas"></div>
+  <div class="map-overlay">
+    <a href="index.html" class="nav-pill left" aria-label="Back">
+      <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+    </a>
+    <div class="sheet" style="padding-bottom:90px">
+      <div class="sheet-handle"></div>
+      <div class="row" style="align-items:baseline;justify-content:space-between">
+        <h1>Choose a vehicle</h1>
+        <span style="font-size:13px;font-weight:600;color:var(--mute)" id="dist-label"></span>
+      </div>
+      <!-- Time windows -->
+      <div class="windows" id="windows"></div>
+      <!-- Vehicle options -->
+      <div class="vehicles" id="vehicles">
+        <div style="color:var(--mute);font-size:14px">Loading prices…</div>
+      </div>
+    </div>
+    <!-- Continue button fixed at bottom of sheet -->
+    <div class="continue-bar">
+      <a id="continue-btn" class="btn btn-primary" href="pay.html" style="text-align:center">Continue · <span id="price-label">—</span></a>
+      <p style="margin:0;text-align:center;font-size:12px;color:var(--mute)">The price is fixed. No extra charges.</p>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"></script>
+<script>
+const ss = (k, v) => v !== undefined ? sessionStorage.setItem('book.' + k, JSON.stringify(v)) : JSON.parse(sessionStorage.getItem('book.' + k) || 'null');
+let region, map, quotes = {};
+let selVeh = ss('vehicle') || 'car', selWin = 'now';
+
+const VEHICLE_ICONS = {
+  bike: '<svg aria-hidden="true" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="16" r="3.5"/><circle cx="18" cy="16" r="3.5"/><path d="M6 16l4-8h5l3 8M10 8H8M13 12h-5"/></svg>',
+  car: '<svg aria-hidden="true" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15v-3l2-5h12l2 5v3zM4 15v3M20 15v3"/><circle cx="8" cy="13.5" r="1"/><circle cx="16" cy="13.5" r="1"/></svg>',
+  van: '<svg aria-hidden="true" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17" r="1.6"/><circle cx="17" cy="17" r="1.6"/></svg>',
+};
+const VEHICLE_DESC = { bike: 'Up to 5 kg. Documents, small parcels.', car: 'Up to 40 kg. Boxes, groceries, cakes.', van: 'Up to 400 kg. Furniture, stock, pallets.' };
+
+async function init() {
+  region = await fetch('/api/region').then(r => r.json());
+  const p = ss('pickup'), d = ss('drop');
+
+  // Map
+  if (window.maplibregl && window.pmtiles && p && d) {
+    const protocol = new pmtiles.Protocol();
+    maplibregl.addProtocol('pmtiles', protocol.tile.bind(protocol));
+    const tilesUrl = region.map && region.map.tilesUrl ? region.map.tilesUrl : '/maps/jhb.pmtiles';
+    map = new maplibregl.Map({
+      container: 'map-canvas',
+      style: mapStyle('pmtiles://' + window.location.origin + tilesUrl),
+      center: [p.lng, p.lat],
+      zoom: 12,
+    });
+    map.on('error', () => {});
+    map.on('load', () => {
+      // Draw route line
+      map.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [[p.lng, p.lat], [d.lng, d.lat]] } } });
+      map.addLayer({ id: 'route-bg', type: 'line', source: 'route', paint: { 'line-color': '#FFFFFF', 'line-width': 12, 'line-cap': 'round' } });
+      map.addLayer({ id: 'route-fg', type: 'line', source: 'route', paint: { 'line-color': '#2563E8', 'line-width': 6, 'line-cap': 'round' } });
+      const b = new maplibregl.LngLatBounds([[p.lng, p.lat], [d.lng, d.lat]]);
+      map.fitBounds(b, { padding: 80, maxZoom: 14 });
+      new maplibregl.Marker({ color: '#2563E8' }).setLngLat([p.lng, p.lat]).addTo(map);
+      new maplibregl.Marker({ color: '#0F1B2D' }).setLngLat([d.lng, d.lat]).addTo(map);
+    });
+  }
+
+  // Quote for each vehicle
+  const vehicles = Object.keys(region.vehicles || { bike: 1, car: 1, van: 1 });
+  if (p && d) {
+    const qs = await Promise.all(vehicles.map(v =>
+      fetch('/api/quote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pickup: p, drop: d, vehicleClass: v }) })
+        .then(r => r.ok ? r.json() : null).then(q => q && ({ v, cap: q.cap, km: q.km })).catch(() => null)
+    ));
+    qs.filter(Boolean).forEach(q => { quotes[q.v] = q.cap; if (q.km) document.getElementById('dist-label').textContent = q.km.toFixed(1) + ' km'; });
+  }
+
+  // Time windows
+  const winsEl = document.getElementById('windows');
+  [['now', 'Now', 'Earliest available'], ['w2', '16:00', '16:00 to 17:00'], ['w3', '17:00', '17:00 to 18:00']].forEach(([id, main, sub]) => {
+    const btn = document.createElement('button');
+    btn.className = 'window-chip' + (selWin === id ? ' selected' : '');
+    btn.dataset.win = id;
+    btn.innerHTML = `<span style="font-size:15px;font-weight:800">${main}</span><span style="font-size:12px;font-weight:600;color:var(--mute)">${sub}</span>`;
+    btn.onclick = () => { selWin = id; document.querySelectorAll('.window-chip').forEach(b => b.classList.toggle('selected', b.dataset.win === id)); };
+    winsEl.appendChild(btn);
+  });
+
+  // Vehicle cards
+  renderVehicles(vehicles);
+}
+
+function renderVehicles(vehicles) {
+  const el = document.getElementById('vehicles');
+  el.innerHTML = '';
+  vehicles.forEach(v => {
+    const btn = document.createElement('button');
+    btn.className = 'vehicle-card' + (selVeh === v ? ' selected' : '');
+    btn.dataset.veh = v;
+    const label = region.vehicles && region.vehicles[v] ? region.vehicles[v].label : v;
+    btn.innerHTML = `<span class="vehicle-icon">${VEHICLE_ICONS[v] || ''}</span><span class="flex1 col"><span style="font-size:16px;font-weight:800">${label}</span><span style="font-size:13px;font-weight:500;color:var(--mute)">${VEHICLE_DESC[v] || ''}</span></span><span style="font-size:18px;font-weight:800">${quotes[v] ? fmtR(quotes[v]) : '—'}</span>`;
+    btn.onclick = () => { selVeh = v; ss('vehicle', v); document.querySelectorAll('.vehicle-card').forEach(b => b.classList.toggle('selected', b.dataset.veh === v)); updatePrice(); };
+    el.appendChild(btn);
+  });
+  updatePrice();
+}
+
+function updatePrice() {
+  const c = quotes[selVeh];
+  document.getElementById('price-label').textContent = c ? fmtR(c) : '—';
+  ss('vehicle', selVeh);
+  ss('capCents', quotes[selVeh] || 0);
+}
+
+function mapStyle(tileUrl) {
+  return {
+    version: 8,
+    sources: { pm: { type: 'vector', url: tileUrl } },
+    layers: [
+      { id: 'bg', type: 'background', paint: { 'background-color': '#EAF0F5' } },
+      { id: 'earth', type: 'fill', source: 'pm', 'source-layer': 'earth', paint: { 'fill-color': '#EAF0F5' } },
+      { id: 'water', type: 'fill', source: 'pm', 'source-layer': 'water', paint: { 'fill-color': '#BDD8EC' } },
+      { id: 'road-minor', type: 'line', source: 'pm', 'source-layer': 'roads', paint: { 'line-color': '#FFFFFF', 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1, 16, 4] } },
+      { id: 'road-major', type: 'line', source: 'pm', 'source-layer': 'roads', filter: ['in', ['get', 'pmap:kind'], ['literal', ['primary', 'secondary', 'trunk', 'highway']]], paint: { 'line-color': '#F0D87A', 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2, 16, 8] } },
+    ],
+  };
+}
+function fmtR(c) { return 'R' + (c / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+
+init();
+</script>
+</body>
+</html>
