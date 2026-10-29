@@ -1,6 +1,44 @@
 const test = require('node:test'), assert = require('node:assert/strict');
+const { DatabaseSync } = require('node:sqlite');
 const { createApp } = require('../server'), { setup } = require('./helpers');
 const A = require('../src/auth'), clock = require('../src/clock');
+
+// Old schema from pre-PR#9 (commit fb12819): sessions had driver_id/region_id/revoked_at, no kind/subject.
+// otps table existed instead of otp_codes.
+const OLD_SCHEMA = `
+PRAGMA journal_mode=WAL;
+CREATE TABLE IF NOT EXISTS drivers (id INTEGER PRIMARY KEY, region_id TEXT, name TEXT, phone TEXT, vehicle TEXT, tier TEXT DEFAULT 'standard', pro_until INTEGER DEFAULT 0, status TEXT DEFAULT 'offline', lat REAL, lng REAL, last_ping INTEGER, pin_lat REAL, pin_lng REAL, pin_at INTEGER, rating REAL DEFAULT 5, created_at INTEGER);
+CREATE TABLE IF NOT EXISTS admin_users (id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created_at INTEGER);
+CREATE TABLE IF NOT EXISTS otps (id INTEGER PRIMARY KEY, region_id TEXT, phone TEXT NOT NULL, driver_id INTEGER, salt TEXT, code_hash TEXT, attempts INTEGER DEFAULT 0, created_at INTEGER, expires_at INTEGER, used_at INTEGER);
+CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, driver_id INTEGER NOT NULL, region_id TEXT, created_at INTEGER, expires_at INTEGER, revoked_at INTEGER);
+`;
+
+test('initAuth migrates old sessions schema: kind column added, live rows preserved, revoked rows dropped', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(OLD_SCHEMA);
+  // Insert a live driver session and a revoked one using old schema
+  db.prepare("INSERT INTO sessions VALUES ('hash_live', 42, 'za-jhb', 1000, 9999999999, NULL)").run();
+  db.prepare("INSERT INTO sessions VALUES ('hash_revoked', 42, 'za-jhb', 1000, 9999999999, 2000)").run();
+  // Run initAuth — this is what fails on an old database without the fix
+  A.initAuth(db);
+  // New schema columns must exist
+  const cols = db.prepare('PRAGMA table_info(sessions)').all().map(r => r.name);
+  assert.ok(cols.includes('kind'), 'kind column must exist after migration');
+  assert.ok(cols.includes('subject'), 'subject column must exist after migration');
+  // Live row migrated; revoked row dropped
+  const rows = db.prepare('SELECT * FROM sessions').all();
+  assert.equal(rows.length, 1, 'only the live session survives');
+  assert.equal(rows[0].token_hash, 'hash_live');
+  assert.equal(rows[0].kind, 'driver');
+  assert.equal(rows[0].subject, 42);
+  // Running initAuth again on the already-migrated db must be a no-op
+  assert.doesNotThrow(() => A.initAuth(db));
+  // The new auth functions must work on the migrated db
+  db.prepare("INSERT INTO drivers VALUES (42,'za-jhb','D','071','car','standard',0,'offline',NULL,NULL,NULL,NULL,NULL,NULL,5,1)").run();
+  const code = A.requestOtp(db, '071', 'dev').devCode;
+  const { token } = A.verifyOtp(db, '071', code);
+  assert.ok(token);
+});
 
 async function boot() {
   const { db, region } = setup(); const srv = createApp({ db, regions: { [region.id]: region } });
