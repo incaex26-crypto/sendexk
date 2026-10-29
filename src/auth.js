@@ -205,8 +205,10 @@ function keyToAccount(db, rawKey) {
 }
 
 function revokeKey(db, keyId, accountId) {
-  const r = db.prepare('UPDATE api_keys SET revoked_at=? WHERE id=? AND account_id=?').run(clock.now(), keyId, accountId);
-  if (r.changes !== 1) throw err(404, 'key not found');
+  const row = db.prepare('SELECT * FROM api_keys WHERE id=? AND account_id=?').get(keyId, accountId);
+  if (!row) throw err(404, 'Key not found.');
+  if (row.revoked_at) throw err(409, 'Key already revoked.');
+  db.prepare('UPDATE api_keys SET revoked_at=? WHERE id=?').run(clock.now(), keyId);
 }
 
 /** Resolve a business request: session cookie, then API key header. */
